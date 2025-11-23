@@ -6,6 +6,7 @@ import { ArrowLeft, Send, Info, Check, CheckCheck, Trash2 } from "lucide-react";
 import { useMiniApp } from "@/contexts/miniapp-context";
 import { useSignMessage } from "wagmi";
 import { getXMTPClient } from "@/lib/xmtp";
+import { useOptimisticMessaging } from "@/hooks/use-optimistic-messaging";
 import {
   getChatById,
   getChatMessages,
@@ -22,18 +23,28 @@ export default function ChatPage() {
   const { context, isMiniAppReady } = useMiniApp();
   const { signMessageAsync } = useSignMessage();
 
+  // Extract user data from context
+  const user = context?.user;
+  const username = user?.username || "@user";
+  const [walletAddress, setWalletAddress] = useState("");
+
   const [chat, setChat] = useState(getChatById(chatId));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [conversation, setConversation] = useState<any>(null);
+  const [useOptimistic, setUseOptimistic] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Extract user data from context
-  const user = context?.user;
-  const username = user?.username || "@user";
-  const [walletAddress, setWalletAddress] = useState("");
+  // Optimistic messaging hook
+  const optimistic = useOptimisticMessaging({
+    serverUrl: process.env.NEXT_PUBLIC_OPTIMISTIC_SERVER_URL || 'http://localhost:5001',
+    userId: walletAddress || username,
+    username: username,
+    wallet: walletAddress,
+    chatId: chatId,
+  });
 
   // Scroll to bottom of messages
   const scrollToBottom = () => {
@@ -92,115 +103,42 @@ export default function ChatPage() {
     initConversation();
   }, [signMessageAsync, walletAddress, chat]);
 
-  // Poll for new messages
+  // Poll for new messages - DISABLED, using optimistic messaging only
   useEffect(() => {
-    if (!conversation) return;
+    // XMTP polling disabled - all messages come from optimistic messaging
+  }, []);
 
-    const pollMessages = async () => {
-      try {
-        await conversation.sync();
-        const xmtpMessages = await conversation.messages();
+  // Sync optimistic messages into the main message list
+  useEffect(() => {
+    if (optimistic.messages.length > 0) {
+      const optimisticMessages = optimistic.messages.map((msg: any) => ({
+        id: msg.id,
+        chatId: chatId,
+        content: msg.content,
+        senderAddress: msg.wallet || walletAddress,
+        timestamp: new Date(msg.timestamp).getTime(),
+        status: 'sent' as const,
+      }));
 
-        // Convert XMTP messages to our format
-        const formattedMessages: ChatMessage[] = xmtpMessages.map((msg: any) => ({
-          id: msg.id,
-          chatId: chatId,
-          content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-          senderAddress: msg.senderAddress || msg.sender || walletAddress, // Use senderAddress instead of senderInboxId
-          timestamp: msg.sentAt ? new Date(msg.sentAt).getTime() : Date.now(),
-          status: 'sent' as const,
-        }));
-
-        // Merge with existing messages, avoiding duplicates
-        setMessages(prev => {
-          const newMessageIds = new Set(formattedMessages.map(m => m.id));
-          const existingNonDuplicates = prev.filter(m => !newMessageIds.has(m.id) && !m.id.startsWith('temp-'));
-          return [...existingNonDuplicates, ...formattedMessages];
-        });
-
-        // Save to local storage
-        formattedMessages.forEach(msg => saveMessage(msg));
-      } catch (error) {
-        console.warn("Error polling messages:", error);
-      }
-    };
-
-    // Poll every 5 seconds
-    const interval = setInterval(pollMessages, 5000);
-
-    // Initial poll
-    pollMessages();
-
-    return () => clearInterval(interval);
-  }, [conversation, chatId, walletAddress]);
+      setMessages(optimisticMessages);
+    }
+  }, [optimistic.messages, chatId, walletAddress]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || !conversation || isSending) return;
+    if (!newMessage.trim() || isSending) return;
 
     const messageContent = newMessage.trim();
     setNewMessage("");
     setIsSending(true);
 
-    const tempId = `temp-${Date.now()}`;
-    const optimisticMessage: ChatMessage = {
-      id: tempId,
-      chatId: chatId,
-      content: messageContent,
-      senderAddress: walletAddress,
-      timestamp: Date.now(),
-      status: 'sending',
-    };
-
-    // Add optimistic message to UI
-    setMessages(prev => [...prev, optimisticMessage]);
-    saveMessage(optimisticMessage);
-    scrollToBottom();
-
     try {
-      // Send optimistically
-      await conversation.sendOptimistic(messageContent);
-
-      // Update status to sent
-      updateMessageStatus(chatId, tempId, 'sent');
-      setMessages(prev =>
-        prev.map(msg => (msg.id === tempId ? { ...msg, status: 'sent' as const } : msg))
-      );
-
-      // Publish the message
-      await conversation.publishMessages();
-
-      // After publishing, sync to get the real message ID
-      await conversation.sync();
-      const xmtpMessages = await conversation.messages();
-      const lastMessage = xmtpMessages[xmtpMessages.length - 1];
-
-      if (lastMessage) {
-        const realMessage: ChatMessage = {
-          id: lastMessage.id,
-          chatId: chatId,
-          content: messageContent,
-          senderAddress: walletAddress,
-          timestamp: lastMessage.sentAt ? new Date(lastMessage.sentAt).getTime() : Date.now(),
-          status: 'sent',
-        };
-
-        saveMessage(realMessage);
-
-        // Replace optimistic message with real one
-        setMessages(prev => prev.filter(msg => msg.id !== tempId).concat(realMessage));
-      }
+      await optimistic.sendMessage(messageContent);
     } catch (error) {
       console.error("Error sending message:", error);
-
-      // Mark as failed
-      updateMessageStatus(chatId, tempId, 'failed');
-      setMessages(prev =>
-        prev.map(msg => (msg.id === tempId ? { ...msg, status: 'failed' as const } : msg))
-      );
     } finally {
       setIsSending(false);
     }
