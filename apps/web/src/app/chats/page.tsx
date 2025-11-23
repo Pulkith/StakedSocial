@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, MessageCircle } from "lucide-react";
+import { Plus, MessageCircle, TrendingUp } from "lucide-react";
 import { useMiniApp } from "@/contexts/miniapp-context";
 import { useSocket } from "@/contexts/socket-context";
 import { getAllChats, type ChatMetadata, getChatMessages, saveChat, deleteChat } from "@/lib/chat-metadata";
+import { getMarketsForChat } from "@/lib/market-service";
 import { getXMTPClient } from "@/lib/xmtp";
 import { useSignMessage } from "wagmi";
 
@@ -243,6 +244,12 @@ export default function ChatsPage() {
             {chats.map((chat, index) => {
               const hasUnread = (chat.unreadCount || 0) > 0 || chat.isNew;
 
+              // Get active bets count
+              const chatMarkets = getMarketsForChat(chat.chatId);
+              const activeBetsCount = chatMarkets.filter(
+                (m) => !m.runtime.status.resolved && !m.runtime.status.cancelled
+              ).length;
+
               // Generate consistent random gradient for each chat based on chatId
               const gradients = [
                 "from-purple-500 to-pink-500",
@@ -288,13 +295,23 @@ export default function ChatsPage() {
                     {/* Chat Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-0.5">
-                        <h3
-                          className={`text-sm truncate ${
-                            hasUnread ? 'font-bold text-gray-900' : 'font-semibold text-gray-800'
-                          }`}
-                        >
-                          {chat.chatName}
-                        </h3>
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <h3
+                            className={`text-sm truncate ${
+                              hasUnread ? 'font-bold text-gray-900' : 'font-semibold text-gray-800'
+                            }`}
+                          >
+                            {chat.chatName}
+                          </h3>
+                          {activeBetsCount > 0 && (
+                            <div className="flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded-md flex-shrink-0">
+                              <TrendingUp className="h-3 w-3" />
+                              <span className="text-xs font-bold">
+                                {activeBetsCount} ACTIVE BET{activeBetsCount > 1 ? 'S' : ''}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                         <span className={`text-xs flex-shrink-0 ml-2 ${
                           hasUnread ? 'font-semibold text-blue-600' : 'text-gray-500'
                         }`}>

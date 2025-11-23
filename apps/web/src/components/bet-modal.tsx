@@ -541,7 +541,7 @@ export default function BetModal({
       {isCreating && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-[60] animate-in fade-in duration-300">
           <div className="bg-white rounded-2xl px-6 py-8 flex flex-col items-center gap-3 shadow-2xl animate-in scale-95 fade-in zoom-in duration-300">
-            <div className="w-12 h-12 border-3 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+            <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
             <p className="text-sm font-medium text-gray-900">Creating market...</p>
           </div>
         </div>

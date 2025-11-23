@@ -374,6 +374,26 @@ export default function ChatPage() {
           </div>
         ) : (
           messages.map((message, index) => {
+            // Check if this is a bet message
+            if (message.type === 'bet' && message.marketId) {
+              const market = chatMarkets.find(m => m.onchain.marketId === message.marketId);
+              if (!market) return null; // Market not loaded yet
+
+              return (
+                <BetMessageCard
+                  key={message.id}
+                  question={market.static.question}
+                  creatorName={market.runtime.creatorUsername || market.onchain.creator.slice(0, 8)}
+                  deadline={new Date(parseInt(market.onchain.deadline) * 1000).toISOString()}
+                  onPlaceBet={() => {
+                    console.log('[BET] Place bet clicked for market:', market.onchain.marketId);
+                    alert('Place bet clicked! This will open the betting interface.');
+                  }}
+                />
+              );
+            }
+
+            // Regular message
             const isMine = isMyMessage(message);
             const senderProfile = chat?.memberProfiles?.[message.senderAddress];
             const senderUsername = senderProfile?.username || message.senderAddress.slice(0, 6) + '...';
@@ -443,20 +463,6 @@ export default function ChatPage() {
             );
           })
         )}
-
-        {/* Bet Messages - Show all markets for this chat */}
-        {chatMarkets.map((market) => (
-          <BetMessageCard
-            key={market.onchain.marketId}
-            question={market.static.question}
-            creatorName={market.runtime.creatorUsername || market.onchain.creator.slice(0, 8)}
-            deadline={new Date(parseInt(market.onchain.deadline) * 1000).toISOString()}
-            onPlaceBet={() => {
-              console.log('[BET] Place bet clicked for market:', market.onchain.marketId);
-              alert('Place bet clicked! This will open the betting interface.');
-            }}
-          />
-        ))}
 
         <div ref={messagesEndRef} />
       </div>
