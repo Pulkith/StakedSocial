@@ -10,6 +10,7 @@ import { getXMTPClient } from "@/lib/xmtp";
 import { useOptimisticMessaging } from "@/hooks/use-optimistic-messaging";
 import BetModal from "@/components/bet-modal";
 import BetMessageCard from "@/components/bet-message-card";
+import BetPlacementCard from "@/components/bet-placement-card";
 import { createMarket, getMarketsForChat, type MarketMetadata } from "@/lib/market-service";
 import {
   getChatById,
@@ -477,6 +478,29 @@ export default function ChatPage() {
               </div>
             );
           })
+        )}
+
+        {/* Mock Bet Placements - for testing */}
+        {typeof window !== 'undefined' && (
+          <div className="mt-4 pt-2 border-t border-gray-200">
+            <BetPlacementCard
+              betterName="Alice"
+              betterPfp="https://api.dicebear.com/7.x/avataaars/svg?seed=Alice"
+              questionText="Will Bitcoin reach $100k by end of year?"
+              timestamp={Date.now() - 5 * 60 * 1000}
+            />
+            <BetPlacementCard
+              betterName="Bob"
+              betterPfp="https://api.dicebear.com/7.x/avataaars/svg?seed=Bob"
+              questionText="Will Bitcoin reach $100k by end of year?"
+              timestamp={Date.now() - 2 * 60 * 1000}
+            />
+            <BetPlacementCard
+              betterName="Charlie"
+              questionText="Will Bitcoin reach $100k by end of year?"
+              timestamp={Date.now() - 30 * 1000}
+            />
+          </div>
         )}
 
         <div ref={messagesEndRef} />
