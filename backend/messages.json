@@ -389,6 +389,46 @@
       "content": "hey",
       "timestamp": "2025-11-23T05:57:51.431819",
       "status": "sent"
+    },
+    {
+      "id": "bb2898ea-dfa4-4f78-92dd-cbd69c52c42a",
+      "chat_id": "f9d92b2c9a2eb4949ca4f81fbb87f041",
+      "user_id": "0xE627CEb73a02d39CeD519c496Bf8C81fe6317005",
+      "username": "pulkith",
+      "wallet": "0xE627CEb73a02d39CeD519c496Bf8C81fe6317005",
+      "content": "e",
+      "timestamp": "2025-11-23T06:19:03.321252",
+      "status": "sent"
+    },
+    {
+      "id": "35e0f112-0d4d-42bd-81df-be6e7764089b",
+      "chat_id": "f9d92b2c9a2eb4949ca4f81fbb87f041",
+      "user_id": "0xE627CEb73a02d39CeD519c496Bf8C81fe6317005",
+      "username": "pulkith",
+      "wallet": "0xE627CEb73a02d39CeD519c496Bf8C81fe6317005",
+      "content": "Haha!",
+      "timestamp": "2025-11-23T08:05:25.898651",
+      "status": "sent"
+    },
+    {
+      "id": "b5e532c1-ac6e-42ef-a8b4-24c8cbb2ed7d",
+      "chat_id": "f9d92b2c9a2eb4949ca4f81fbb87f041",
+      "user_id": "0xE627CEb73a02d39CeD519c496Bf8C81fe6317005",
+      "username": "pulkith",
+      "wallet": "0xE627CEb73a02d39CeD519c496Bf8C81fe6317005",
+      "content": "Ooh I have a bet!",
+      "timestamp": "2025-11-23T08:05:57.830939",
+      "status": "sent"
+    },
+    {
+      "id": "67c8014b-7081-4969-948e-9ff8c8e61286",
+      "chat_id": "f9d92b2c9a2eb4949ca4f81fbb87f041",
+      "user_id": "0x65C88500a558C7f4F626C40D4a0487Bf510B3206",
+      "username": "pragya",
+      "wallet": "0x65C88500a558C7f4F626C40D4a0487Bf510B3206",
+      "content": "me too!",
+      "timestamp": "2025-11-23T08:07:22.909041",
+      "status": "sent"
     }
   ]
 }

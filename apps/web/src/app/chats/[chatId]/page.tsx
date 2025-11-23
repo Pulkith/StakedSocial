@@ -3,15 +3,17 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { ArrowLeft, Send, Info, Check, CheckCheck, Trash2, Plus, CheckCircle, AlertCircle } from "lucide-react";
+import { ethers } from "ethers";
 import { useMiniApp } from "@/contexts/miniapp-context";
 import { useSocket } from "@/contexts/socket-context";
 import { useSignMessage } from "wagmi";
 import { getXMTPClient } from "@/lib/xmtp";
 import { useOptimisticMessaging } from "@/hooks/use-optimistic-messaging";
 import BetModal from "@/components/bet-modal";
+import PlaceBetModal from "@/components/place-bet-modal";
 import BetMessageCard from "@/components/bet-message-card";
 import BetPlacementCard from "@/components/bet-placement-card";
-import { createMarket, getMarketsForChat, type MarketMetadata } from "@/lib/market-service";
+import { createMarket, placeBet, getMarketsForChat, getUserPositions, getUserMarketShares, type MarketMetadata } from "@/lib/market-service";
 import {
   getChatById,
   getChatMessages,
@@ -22,6 +24,7 @@ import {
   type ChatMessage,
   type ChatMetadata,
 } from "@/lib/chat-metadata";
+
 
 export default function ChatPage() {
   const router = useRouter();
@@ -43,6 +46,8 @@ export default function ChatPage() {
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showBetModal, setShowBetModal] = useState(false);
+  const [showPlaceBetModal, setShowPlaceBetModal] = useState(false);
+  const [selectedMarketForBetting, setSelectedMarketForBetting] = useState<MarketMetadata | null>(null);
   const [conversation, setConversation] = useState<any>(null);
   const [useOptimistic, setUseOptimistic] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -323,6 +328,61 @@ export default function ChatPage() {
     }
   };
 
+  const handlePlaceBet = async (outcomeIndex: number, sharesAmount: string) => {
+
+    // console.log(window.ethereum)
+    // console.log(window.ethereum?.providers)
+    // console.log(window.ethereum?.isFarcaster)
+
+    try {
+      if (!selectedMarketForBetting) {
+        setToast({
+          type: "error",
+          message: "No market selected.",
+        });
+        return;
+      }
+  
+      if (!walletAddress) {
+        setToast({
+          type: "error",
+          message: "No wallet connected.",
+        });
+        return;
+      }
+  
+      const result = await placeBet({
+        marketId: selectedMarketForBetting.onchain.marketId,
+        outcomeIndex,
+        amountWei: sharesAmount,
+        userAddress: walletAddress,
+        username,
+        signMessageAsync,
+      });
+  
+      const updatedMarkets = getMarketsForChat(chatId);
+      setChatMarkets(updatedMarkets);
+  
+      const updatedMessages = getChatMessages(chatId);
+      setMessages(updatedMessages);
+      scrollToBottom();
+  
+      setToast({
+        type: "success",
+        message: "Bet placed successfully!",
+      });
+  
+      setTimeout(() => setToast(null), 3000);
+      setShowPlaceBetModal(false);
+      setSelectedMarketForBetting(null);
+    } catch (error: any) {
+      setToast({
+        type: "error",
+        message: error.message || "Failed to place bet.",
+      });
+    }
+  };
+
   const formatTimestamp = (timestamp: number) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -389,118 +449,135 @@ export default function ChatPage() {
             <p className="text-xs text-gray-500 font-medium">No messages yet. Start the conversation!</p>
           </div>
         ) : (
-          messages.map((message, index) => {
-            // Check if this is a bet message
-            if (message.type === 'bet' && message.marketId) {
-              const market = chatMarkets.find(m => m.onchain.marketId === message.marketId);
-              if (!market) return null; // Market not loaded yet
+          <>
+            {messages.map((message, index) => {
+              // Check if this is a bet message
+              if (message.type === 'bet' && message.marketId) {
+                const market = chatMarkets.find(m => m.onchain.marketId === message.marketId);
+                if (!market) return null; // Market not loaded yet
+
+                return (
+                  <BetMessageCard
+                    key={message.id}
+                    question={market.static.question}
+                    creatorName={market.runtime.creatorUsername || market.onchain.creator.slice(0, 8)}
+                    deadline={new Date(parseInt(market.onchain.deadline) * 1000).toISOString()}
+                    onPlaceBet={() => {
+                      console.log('[BET] Place bet clicked for market:', market.onchain.marketId);
+                      setSelectedMarketForBetting(market);
+                      setShowPlaceBetModal(true);
+                    }}
+                  />
+                );
+              }
+
+              // Regular message
+              const isMine = isMyMessage(message);
+              const senderProfile = chat?.memberProfiles?.[message.senderAddress];
+              const senderUsername = senderProfile?.username || message.senderAddress.slice(0, 6) + '...';
+              const senderPfp = senderProfile?.pfp;
+              const senderDisplayName = senderProfile?.display_name || senderUsername;
+
+              // Check if this is a bet placement message - if so, also render the BetPlacementCard
+              const isBetPlacementMessage = message.content.includes('placed a bet on');
 
               return (
-                <BetMessageCard
-                  key={message.id}
-                  question={market.static.question}
-                  creatorName={market.runtime.creatorUsername || market.onchain.creator.slice(0, 8)}
-                  deadline={new Date(parseInt(market.onchain.deadline) * 1000).toISOString()}
-                  onPlaceBet={() => {
-                    console.log('[BET] Place bet clicked for market:', market.onchain.marketId);
-                    alert('Place bet clicked! This will open the betting interface.');
-                  }}
-                />
-              );
-            }
-
-            // Regular message
-            const isMine = isMyMessage(message);
-            const senderProfile = chat?.memberProfiles?.[message.senderAddress];
-            const senderUsername = senderProfile?.username || message.senderAddress.slice(0, 6) + '...';
-            const senderPfp = senderProfile?.pfp;
-            const senderDisplayName = senderProfile?.display_name || senderUsername;
-
-            return (
-              <div
-                key={message.id}
-                className={`flex gap-1 animate-in fade-in slide-in-from-bottom-1 duration-300`}
-                style={{
-                  justifyContent: isMine ? 'flex-end' : 'flex-start',
-                  animationDelay: `${index * 30}ms`,
-                }}
-              >
-                {/* Profile Picture for Others */}
-                {!isMine && (
-                  <div className="w-6 h-6 rounded-full overflow-hidden flex-shrink-0 mt-0.5">
-                    {senderPfp ? (
-                      <img
-                        src={senderPfp}
-                        alt={senderUsername}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center text-white text-xs font-bold">
-                        {senderDisplayName.charAt(0).toUpperCase()}
+                <div key={message.id}>
+                  <div
+                    className={`flex gap-1 animate-in fade-in slide-in-from-bottom-1 duration-300`}
+                    style={{
+                      justifyContent: isMine ? 'flex-end' : 'flex-start',
+                      animationDelay: `${index * 30}ms`,
+                    }}
+                  >
+                    {/* Profile Picture for Others */}
+                    {!isMine && (
+                      <div className="w-6 h-6 rounded-full overflow-hidden flex-shrink-0 mt-0.5">
+                        {senderPfp ? (
+                          <img
+                            src={senderPfp}
+                            alt={senderUsername}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center text-white text-xs font-bold">
+                            {senderDisplayName.charAt(0).toUpperCase()}
+                          </div>
+                        )}
                       </div>
                     )}
-                  </div>
-                )}
 
-                <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} gap-0.5`}>
-                  {/* Username for Others */}
-                  {!isMine && (
-                    <span className="text-xs font-semibold text-gray-600 px-1.5">
-                      {senderDisplayName}
-                    </span>
-                  )}
-
-                  {/* Message Bubble */}
-                  <div
-                    className={`max-w-[75%] rounded-xl px-3 py-1.5 ${
-                      isMine
-                        ? 'bg-blue-600 text-white shadow-md'
-                        : 'bg-white text-gray-900 shadow-sm border border-gray-200'
-                    }`}
-                  >
-                    <p className="text-xs break-words">{message.content}</p>
-                    <div
-                      className={`flex items-center gap-1 mt-0.5 text-xs ${
-                        isMine ? 'text-blue-100 justify-end' : 'text-gray-500'
-                      }`}
-                    >
-                      <span className="text-xs">{formatTimestamp(message.timestamp)}</span>
-                      {isMine && (
-                        <span>
-                          {message.status === 'sending' && <Check className="h-2.5 w-2.5" />}
-                          {message.status === 'sent' && <CheckCheck className="h-2.5 w-2.5" />}
-                          {message.status === 'failed' && <span className="text-red-300">!</span>}
+                    <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} gap-0.5`}>
+                      {/* Username for Others */}
+                      {!isMine && (
+                        <span className="text-xs font-semibold text-gray-600 px-1.5">
+                          {senderDisplayName}
                         </span>
                       )}
+
+                      {/* Message Bubble */}
+                      <div
+                        className={`max-w-[75%] rounded-xl px-3 py-1.5 ${
+                          isMine
+                            ? 'bg-blue-600 text-white shadow-md'
+                            : 'bg-white text-gray-900 shadow-sm border border-gray-200'
+                        }`}
+                      >
+                        <p className="text-xs break-words">{message.content}</p>
+                        <div
+                          className={`flex items-center gap-1 mt-0.5 text-xs ${
+                            isMine ? 'text-blue-100 justify-end' : 'text-gray-500'
+                          }`}
+                        >
+                          <span className="text-xs">{formatTimestamp(message.timestamp)}</span>
+                          {isMine && (
+                            <span>
+                              {message.status === 'sending' && <Check className="h-2.5 w-2.5" />}
+                              {message.status === 'sent' && <CheckCheck className="h-2.5 w-2.5" />}
+                              {message.status === 'failed' && <span className="text-red-300">!</span>}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            );
-          })
-        )}
 
-        {/* Mock Bet Placements - for testing */}
-        {typeof window !== 'undefined' && (
-          <div className="mt-4 pt-2 border-t border-gray-200">
-            <BetPlacementCard
-              betterName="Alice"
-              betterPfp="https://api.dicebear.com/7.x/avataaars/svg?seed=Alice"
-              questionText="Will Bitcoin reach $100k by end of year?"
-              timestamp={Date.now() - 5 * 60 * 1000}
-            />
-            <BetPlacementCard
-              betterName="Bob"
-              betterPfp="https://api.dicebear.com/7.x/avataaars/svg?seed=Bob"
-              questionText="Will Bitcoin reach $100k by end of year?"
-              timestamp={Date.now() - 2 * 60 * 1000}
-            />
-            <BetPlacementCard
-              betterName="Charlie"
-              questionText="Will Bitcoin reach $100k by end of year?"
-              timestamp={Date.now() - 30 * 1000}
-            />
-          </div>
+                  {/* Render BetPlacementCard for bet placement messages */}
+                  {isBetPlacementMessage && (
+                    <div className="mt-1">
+                      <BetPlacementCard
+                        betterName={senderDisplayName}
+                        betterPfp={senderPfp}
+                        questionText={message.content.split('"')[1] || 'a bet'}
+                        timestamp={message.timestamp}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Mock Bet Placement Examples */}
+            <div className="mt-4 pt-2 border-t border-gray-200 space-y-2">
+              <BetPlacementCard
+                betterName="Pragya"
+                betterPfp="https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/3355c5ea-0758-45ef-a113-a13f89be1500/rectcontain2"
+                questionText="Will nevan get a girl (Nov 29)?"
+                timestamp={Date.now() - 5 * 60 * 1000} // 5 minutes ago
+              />
+              <BetPlacementCard
+                betterName="Pulkith"
+                betterPfp="https://api.dicebear.com/7.x/avataaars/svg?seed=sarah"
+                questionText="Will nevan get a girl (Nov 29)?"
+                timestamp={Date.now() - 2 * 60 * 1000} // 2 minutes ago
+              />
+              {/* <BetPlacementCard
+                betterName="Mike"
+                questionText="Will it rain tomorrow?"
+                timestamp={Date.now() - 30 * 1000} // 30 seconds ago
+              /> */}
+            </div>
+          </>
         )}
 
         <div ref={messagesEndRef} />
@@ -624,6 +701,21 @@ export default function ChatPage() {
         onCreateBet={handleCreateBet}
       />
 
+      {/* Place Bet Modal */}
+      {selectedMarketForBetting && (
+        <PlaceBetModal
+          isOpen={showPlaceBetModal}
+          onClose={() => {
+            setShowPlaceBetModal(false);
+            setSelectedMarketForBetting(null);
+          }}
+          market={selectedMarketForBetting}
+          userAddress={walletAddress}
+          username={username}
+          onPlaceBet={handlePlaceBet}
+        />
+      )}
+
       {/* Toast Notifications */}
       {toast && (
         <>
@@ -651,7 +743,7 @@ export default function ChatPage() {
                   </div>
                   <div className="flex-1">
                     <h3 className="text-base font-bold text-gray-900 mb-1">
-                      Market Creation Failed
+                      {toast.message?.includes('market') ? 'Market Creation Failed' : 'Bet Placement Failed'}
                     </h3>
                     <p className="text-sm text-gray-600">{toast.message}</p>
                   </div>
