@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ArrowLeft, Send, Info, Check, CheckCheck, Trash2 } from "lucide-react";
+import { ArrowLeft, Send, Info, Check, CheckCheck, Trash2, Plus } from "lucide-react";
 import { useMiniApp } from "@/contexts/miniapp-context";
 import { useSocket } from "@/contexts/socket-context";
 import { useSignMessage } from "wagmi";
 import { getXMTPClient } from "@/lib/xmtp";
 import { useOptimisticMessaging } from "@/hooks/use-optimistic-messaging";
+import BetModal from "@/components/bet-modal";
 import {
   getChatById,
   getChatMessages,
@@ -38,6 +39,7 @@ export default function ChatPage() {
   const [isSending, setIsSending] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showBetModal, setShowBetModal] = useState(false);
   const [conversation, setConversation] = useState<any>(null);
   const [useOptimistic, setUseOptimistic] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -234,6 +236,20 @@ export default function ChatPage() {
     setShowDeleteConfirm(false);
   };
 
+  const handleCreateBet = async (betData: any) => {
+    // Log the bet data for now - you'll integrate with your backend later
+    console.log('[BET] Creating bet with data:', betData);
+
+    // TODO: Integrate with your backend API
+    // For now, we'll simulate a small delay to show the loading state
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        console.log('[BET] Bet created successfully');
+        resolve({});
+      }, 2000);
+    });
+  };
+
   const formatTimestamp = (timestamp: number) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -268,12 +284,21 @@ export default function ChatPage() {
             <p className="text-xs text-gray-500">{chat.memberWallets.length} member{chat.memberWallets.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
-        <button
-          onClick={() => setShowInfoModal(true)}
-          className="p-1.5 hover:bg-gray-100 active:scale-95 rounded-full transition-all"
-        >
-          <Info className="h-4 w-4 text-gray-600" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowBetModal(true)}
+            className="p-1.5 hover:bg-gray-100 active:scale-95 rounded-full transition-all"
+            title="Create a bet"
+          >
+            <Plus className="h-4 w-4 text-gray-600" />
+          </button>
+          <button
+            onClick={() => setShowInfoModal(true)}
+            className="p-1.5 hover:bg-gray-100 active:scale-95 rounded-full transition-all"
+          >
+            <Info className="h-4 w-4 text-gray-600" />
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -465,6 +490,22 @@ export default function ChatPage() {
           </div>
         </div>
       )}
+
+      {/* Bet Modal */}
+      <BetModal
+        isOpen={showBetModal}
+        onClose={() => setShowBetModal(false)}
+        groupMembers={
+          chat?.memberProfiles
+            ? Object.entries(chat.memberProfiles).map(([wallet, profile]: [string, any]) => ({
+                username: profile.username || profile.display_name || wallet.slice(0, 6),
+                wallet,
+                pfp: profile.pfp,
+              }))
+            : []
+        }
+        onCreateBet={handleCreateBet}
+      />
     </div>
   );
 }
