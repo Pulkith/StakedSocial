@@ -1,7 +1,7 @@
 
 
 
-# StakdSocial
+# StakedSocial
 
 ![Chats](https://github.com/user-attachments/assets/404cc90b-df18-4876-be8b-84aa7895b4ad)
 
