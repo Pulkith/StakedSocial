@@ -4,15 +4,16 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, MessageCircle } from "lucide-react";
 import { useMiniApp } from "@/contexts/miniapp-context";
-import { getAllChats, type ChatMetadata, getChatMessages, saveChat } from "@/lib/chat-metadata";
+import { useSocket } from "@/contexts/socket-context";
+import { getAllChats, type ChatMetadata, getChatMessages, saveChat, deleteChat } from "@/lib/chat-metadata";
 import { getXMTPClient } from "@/lib/xmtp";
 import { useSignMessage } from "wagmi";
-import { io } from "socket.io-client";
 
 export default function ChatsPage() {
   const router = useRouter();
   const { context, isMiniAppReady } = useMiniApp();
   const { signMessageAsync } = useSignMessage();
+  const { socket } = useSocket();
   const [chats, setChats] = useState<ChatMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -43,32 +44,13 @@ export default function ChatsPage() {
     }
   }, [isMiniAppReady, username]);
 
-  // Load chats from backend and localStorage
+  // Load chats from localStorage ONLY (not backend - prevents re-adding deleted chats)
   useEffect(() => {
     const loadChats = async () => {
       setIsLoading(true);
       try {
-        // Load from localStorage first
+        // Load from localStorage only
         const localChats = getAllChats();
-
-        // Then fetch from backend
-        try {
-          const backendUrl = process.env.NEXT_PUBLIC_OPTIMISTIC_SERVER_URL || 'http://localhost:5001';
-          const response = await fetch(`${backendUrl}/api/get-all-chats`);
-          const data = await response.json();
-          const backendChats = data.chats || {};
-
-          // Convert backend chats to ChatMetadata format if needed
-          Object.values(backendChats).forEach((chat: any) => {
-            if (chat && chat.chatId && !localChats.find(c => c.chatId === chat.chatId)) {
-              // Save backend chats to local storage
-              saveChat(chat);
-              localChats.push(chat);
-            }
-          });
-        } catch (error) {
-          console.warn("Could not fetch chats from backend:", error);
-        }
 
         // Sort by last message time or created time
         localChats.sort((a, b) => {
@@ -91,20 +73,16 @@ export default function ChatsPage() {
 
   // XMTP polling disabled - messages come from optimistic messaging
 
-  // Listen for real-time chat updates via socket.io
+  // Join chat rooms and listen for updates via shared socket
   useEffect(() => {
-    const socket = io(process.env.NEXT_PUBLIC_OPTIMISTIC_SERVER_URL || 'http://localhost:5001', {
-      reconnection: true,
-    });
+    if (!socket || (!walletAddress && !username)) return;
 
-    socket.on('connect', () => {
-      // Join user to their chat rooms
-      const localChats = getAllChats();
-      localChats.forEach(chat => {
-        socket.emit('join_chat', {
-          chat_id: chat.chatId,
-          user_id: walletAddress || username,
-        });
+    // Join user to their chat rooms
+    const localChats = getAllChats();
+    localChats.forEach(chat => {
+      socket.emit('join_chat', {
+        chat_id: chat.chatId,
+        user_id: walletAddress || username,
       });
     });
 
@@ -112,15 +90,10 @@ export default function ChatsPage() {
       saveChat(chatData);
       setChats(prev => {
         const exists = prev.some(c => c.chatId === chatData.chatId);
-        if (exists) {
-          // Update existing chat
-          return prev.map(c =>
-            c.chatId === chatData.chatId
-              ? { ...c, ...chatData, isNew: true }
-              : c
-          );
+        if (!exists) {
+          return [chatData, ...prev];
         }
-        return [{ ...chatData, isNew: true }, ...prev];
+        return prev;
       });
 
       // Join the new chat room
@@ -131,12 +104,31 @@ export default function ChatsPage() {
     });
 
     // Listen for message updates in chats
-    socket.on('chat_updated', (data: { chat_id: string; chat: ChatMetadata }) => {
+    const handleChatUpdate = (data: { chat_id: string; chat: ChatMetadata }) => {
+      console.log('Received update_chat:', data);
+
+      // Save to localStorage
       saveChat(data.chat);
+
       setChats(prev => {
+        const chatExists = prev.some(c => c.chatId === data.chat_id);
+
+        if (!chatExists) {
+          console.log('Chat not in local list, adding it:', data.chat_id);
+          // Add new chat if it doesn't exist
+          const updated = [data.chat, ...prev];
+          updated.sort((a, b) => {
+            const timeA = a.lastMessageTime || a.createdAt;
+            const timeB = b.lastMessageTime || b.createdAt;
+            return timeB - timeA;
+          });
+          return updated;
+        }
+
         const updated = prev.map(c => {
           if (c.chatId === data.chat_id) {
-            return { ...c, ...data.chat, isNew: true };
+            console.log('Updating chat:', data.chat_id, 'isNew:', data.chat.isNew);
+            return { ...data.chat };
           }
           return c;
         });
@@ -150,12 +142,34 @@ export default function ChatsPage() {
 
         return updated;
       });
-    });
+    };
+
+    socket.on('update_chat', handleChatUpdate);
+    socket.on('broadcast_chat_update', handleChatUpdate);
+
+    // Listen for chat deletions
+    const handleChatDeleted = (data: { chat_id: string }) => {
+      console.log('[DELETE] Received chat deletion:', data.chat_id);
+      // Also delete from localStorage when we get the event
+      deleteChat(data.chat_id);
+      setChats(prev => {
+        const filtered = prev.filter(c => c.chatId !== data.chat_id);
+        console.log('[DELETE] Removed deleted chat from list');
+        return filtered;
+      });
+    };
+
+    socket.on('delete_chat', handleChatDeleted);
+    socket.on('broadcast_delete_chat', handleChatDeleted);
 
     return () => {
-      socket.disconnect();
+      socket.off('new_chat_created');
+      socket.off('update_chat', handleChatUpdate);
+      socket.off('broadcast_chat_update', handleChatUpdate);
+      socket.off('delete_chat', handleChatDeleted);
+      socket.off('broadcast_delete_chat', handleChatDeleted);
     };
-  }, [walletAddress, username]);
+  }, [socket, walletAddress, username]);
 
   const formatTimestamp = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -186,20 +200,20 @@ export default function ChatsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 pt-20 pb-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 pt-20 pb-24">
       <div className="max-w-2xl mx-auto px-4">
         {/* Header with Create Chat Button */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">Chats</h1>
-            <p className="text-gray-600">Your conversations</p>
+            <h1 className="text-2xl font-bold text-gray-900 mb-1">Chats</h1>
+            <p className="text-sm text-gray-600">Your conversations</p>
           </div>
           <button
             onClick={() => router.push('/invite')}
-            className="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 active:scale-95 transition-all shadow-lg hover:shadow-xl"
+            className="bg-blue-600 text-white p-2 rounded-full hover:bg-blue-700 active:scale-95 transition-all shadow-lg hover:shadow-xl"
             title="Create new chat"
           >
-            <Plus className="h-6 w-6" />
+            <Plus className="h-4 w-4" />
           </button>
         </div>
 
@@ -213,13 +227,13 @@ export default function ChatsPage() {
             <p className="text-gray-500 font-medium">Loading chats...</p>
           </div>
         ) : chats.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-2xl shadow-sm border border-gray-100">
-            <MessageCircle className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">No chats yet</h3>
-            <p className="text-gray-600 mb-6">Start a conversation with your friends</p>
+          <div className="text-center py-8 bg-white rounded-2xl shadow-sm border border-gray-100">
+            <MessageCircle className="h-10 w-10 text-gray-300 mx-auto mb-3" />
+            <h3 className="text-base font-semibold text-gray-900 mb-1">No chats yet</h3>
+            <p className="text-sm text-gray-600 mb-4">Start a conversation with your friends</p>
             <button
               onClick={() => router.push('/invite')}
-              className="px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 active:scale-95 transition-all"
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 active:scale-95 transition-all"
             >
               Create New Chat
             </button>
@@ -240,28 +254,28 @@ export default function ChatsPage() {
                     );
                     router.push(`/chats/${chat.chatId}`);
                   }}
-                  className={`bg-white rounded-2xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer border-2 border-transparent hover:border-blue-200 active:scale-98 animate-in fade-in slide-in-from-bottom-2 duration-300 ${
+                  className={`bg-white rounded-xl p-3 shadow-sm hover:shadow-md transition-all cursor-pointer border-2 border-transparent hover:border-blue-200 active:scale-98 animate-in fade-in slide-in-from-bottom-2 duration-300 ${
                     hasUnread ? 'ring-1 ring-blue-500 ring-opacity-50' : ''
                   }`}
                   style={{
                     animationDelay: `${index * 50}ms`,
                   }}
                 >
-                  <div className="flex items-start gap-4">
+                  <div className="flex items-start gap-3">
                     {/* Chat Icon */}
-                    <div className={`w-14 h-14 rounded-full flex items-center justify-center flex-shrink-0 shadow-md ${
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 shadow-md ${
                       hasUnread
                         ? 'bg-gradient-to-br from-blue-500 to-indigo-600 animate-pulse'
                         : 'bg-gradient-to-br from-blue-400 to-indigo-500'
                     }`}>
-                      <MessageCircle className="h-7 w-7 text-white" />
+                      <MessageCircle className="h-5 w-5 text-white" />
                     </div>
 
                     {/* Chat Info */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center justify-between mb-0.5">
                         <h3
-                          className={`text-lg truncate ${
+                          className={`text-sm truncate ${
                             hasUnread ? 'font-bold text-gray-900' : 'font-semibold text-gray-800'
                           }`}
                         >
@@ -275,7 +289,7 @@ export default function ChatsPage() {
                       </div>
 
                       <p
-                        className={`text-sm truncate ${
+                        className={`text-xs truncate ${
                           hasUnread ? 'font-bold text-gray-900' : 'text-gray-600'
                         }`}
                       >
@@ -285,7 +299,7 @@ export default function ChatsPage() {
 
                     {/* New Message Indicator */}
                     {hasUnread && (
-                      <div className="w-2 h-2 bg-blue-600 rounded-full flex-shrink-0 mt-1 shadow-lg animate-pulse"></div>
+                      <div className="w-1.5 h-1.5 bg-blue-600 rounded-full flex-shrink-0 mt-1 shadow-lg animate-pulse"></div>
                     )}
                   </div>
                 </div>

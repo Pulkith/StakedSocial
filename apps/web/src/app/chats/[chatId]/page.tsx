@@ -4,10 +4,10 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { ArrowLeft, Send, Info, Check, CheckCheck, Trash2 } from "lucide-react";
 import { useMiniApp } from "@/contexts/miniapp-context";
+import { useSocket } from "@/contexts/socket-context";
 import { useSignMessage } from "wagmi";
 import { getXMTPClient } from "@/lib/xmtp";
 import { useOptimisticMessaging } from "@/hooks/use-optimistic-messaging";
-import { io } from "socket.io-client";
 import {
   getChatById,
   getChatMessages,
@@ -37,10 +37,13 @@ export default function ChatPage() {
   const [newMessage, setNewMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [conversation, setConversation] = useState<any>(null);
   const [useOptimistic, setUseOptimistic] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const socketRef = useRef<any>(null);
+
+  // Use shared socket connection
+  const { socket } = useSocket();
 
   // Optimistic messaging hook
   const optimistic = useOptimisticMessaging({
@@ -77,58 +80,51 @@ export default function ChatPage() {
     }
   }, [isMiniAppReady, username]);
 
-  // Load messages and mark as loaded
+  // Load messages from localStorage but don't mark as loaded yet
   useEffect(() => {
     if (chatId) {
       const loadedMessages = getChatMessages(chatId);
       setMessages(loadedMessages);
-      setMessagesLoaded(true);
+      // DON'T set messagesLoaded to true yet - wait for optimistic messages
       scrollToBottom();
+
+      // Clear isNew flag for this chat since user is viewing it
+      if (chat) {
+        const clearedChat = { ...chat, isNew: false };
+        setChat(clearedChat);
+        saveChat(clearedChat);
+      }
     }
   }, [chatId]);
 
-  // Initialize socket connection for emitting chat updates
+  // Join chat room when viewing a specific chat
   useEffect(() => {
-    const socket = io(process.env.NEXT_PUBLIC_OPTIMISTIC_SERVER_URL || 'http://localhost:5001', {
-      reconnection: true,
+    if (!chatId || !socket) return;
+
+    socket.emit('join_chat', {
+      chat_id: chatId,
+      user_id: walletAddress || username,
     });
-
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      console.log('Connected to chat update server');
-      // Join the chat room
-      socket.emit('join_chat', {
-        chat_id: chatId,
-        user_id: walletAddress || username,
-      });
-    });
-
-    return () => {
-      if (socket) {
-        socket.disconnect();
-      }
-    };
-  }, [chatId, walletAddress, username]);
-
-  // Poll for new messages - DISABLED, using optimistic messaging only
-  useEffect(() => {
-    // XMTP polling disabled - all messages come from optimistic messaging
-  }, []);
+  }, [chatId, socket, walletAddress, username]);
 
   // Sync optimistic messages into the main message list
   useEffect(() => {
-    if (optimistic.messages.length > 0) {
-      const optimisticMessages = optimistic.messages.map((msg: any) => ({
-        id: msg.id,
-        chatId: chatId,
-        content: msg.content,
-        senderAddress: msg.wallet || walletAddress,
-        timestamp: new Date(msg.timestamp).getTime(),
-        status: 'sent' as const,
-      }));
+    if (!optimistic.messages.length) return;
 
+    const optimisticMessages = optimistic.messages.map((msg: any) => ({
+      id: msg.id,
+      chatId: chatId,
+      content: msg.content,
+      senderAddress: msg.wallet || walletAddress,
+      timestamp: new Date(msg.timestamp).getTime(),
+      status: 'sent' as const,
+    }));
+
+    // Only update if message count changed
+    if (optimisticMessages.length !== messages.length) {
       setMessages(optimisticMessages);
+      // Only mark as loaded when we actually have messages to display
+      setMessagesLoaded(true);
 
       // Update chat metadata with latest message
       if (chat && optimisticMessages.length > 0) {
@@ -141,22 +137,43 @@ export default function ChatPage() {
           lastMessageTime: lastMsg.timestamp,
           lastMessage: `${senderName}: ${lastMsg.content.substring(0, 50)}`,
           lastMessageSender: lastMsg.senderAddress,
-          isNew: !isMyMessage(lastMsg),
+          isNew: false, // Don't mark as new if user is viewing this chat
         };
 
-        // Save to local storage
         saveChat(updatedChat);
 
-        // Emit to socket for other clients
-        if (socketRef.current) {
-          socketRef.current.emit('update_chat', {
+        // Emit to shared socket for other clients
+        // For other clients not viewing this chat, mark as new
+        if (socket) {
+          const chatUpdateData = {
             chat_id: chatId,
-            chat: updatedChat,
-          });
+            chat: {
+              ...updatedChat,
+              isNew: true, // Other clients should see this as new
+            },
+          };
+
+          // Emit to the chat room
+          socket.emit('update_chat', chatUpdateData);
+
+          // Also broadcast to all connected clients as fallback
+          socket.emit('broadcast_chat_update', chatUpdateData);
         }
       }
     }
-  }, [optimistic.messages, chatId, walletAddress, chat]);
+  }, [optimistic.messages, chatId]);
+
+  // Mark as loaded if no messages after a timeout
+  useEffect(() => {
+    if (messagesLoaded) return; // Already loaded, don't set timeout
+
+    const timeout = setTimeout(() => {
+      // If we still haven't loaded after 2 seconds, show "no messages"
+      setMessagesLoaded(true);
+    }, 2000);
+
+    return () => clearTimeout(timeout);
+  }, [messagesLoaded, chatId]);
 
   useEffect(() => {
     scrollToBottom();
@@ -178,17 +195,43 @@ export default function ChatPage() {
     }
   };
 
-  const handleDeleteChat = async () => {
-    if (!confirm("Are you sure you want to delete this chat? This action cannot be undone.")) {
-      return;
-    }
+  const handleDeleteChat = () => {
+    console.log('[DELETE] Delete button clicked');
+    setShowDeleteConfirm(true);
+  };
 
+  const confirmDelete = () => {
+    console.log('[DELETE] Confirmed deletion');
     try {
+      console.log('[DELETE] Deleting chat:', chatId);
       deleteChat(chatId);
+      console.log('[DELETE] Chat deleted');
+
+      // Emit deletion event to all connected clients
+      if (socket) {
+        console.log('[DELETE] Emitting delete_chat event to socket');
+        socket.emit('delete_chat', {
+          chat_id: chatId,
+          user_id: walletAddress || username,
+        });
+        socket.emit('broadcast_delete_chat', {
+          chat_id: chatId,
+          user_id: walletAddress || username,
+        });
+      }
+
+      setShowDeleteConfirm(false);
+      setShowInfoModal(false);
+      console.log('[DELETE] Redirecting to /chats');
       router.push('/chats');
     } catch (error) {
-      console.error("Error deleting chat:", error);
+      console.error("[DELETE] Error deleting chat:", error);
     }
+  };
+
+  const cancelDelete = () => {
+    console.log('[DELETE] Cancelled deletion');
+    setShowDeleteConfirm(false);
   };
 
   const formatTimestamp = (timestamp: number) => {
@@ -212,40 +255,40 @@ export default function ChatPage() {
   return (
     <div className="flex flex-col h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       {/* Header */}
-      <div className="bg-white/95 shadow-sm border-b border-gray-200 px-4 py-4 flex items-center justify-between backdrop-blur-sm">
-        <div className="flex items-center gap-3">
+      <div className="bg-white/95 shadow-sm border-b border-gray-200 px-3 py-2 flex items-center justify-between backdrop-blur-sm">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => router.push('/chats')}
-            className="p-2 hover:bg-gray-100 active:scale-95 rounded-full transition-all"
+            className="p-1.5 hover:bg-gray-100 active:scale-95 rounded-full transition-all"
           >
-            <ArrowLeft className="h-5 w-5 text-gray-600" />
+            <ArrowLeft className="h-4 w-4 text-gray-600" />
           </button>
           <div>
-            <h1 className="text-lg font-bold text-gray-900">{chat.chatName}</h1>
+            <h1 className="text-sm font-bold text-gray-900">{chat.chatName}</h1>
             <p className="text-xs text-gray-500">{chat.memberWallets.length} member{chat.memberWallets.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
         <button
           onClick={() => setShowInfoModal(true)}
-          className="p-2 hover:bg-gray-100 active:scale-95 rounded-full transition-all"
+          className="p-1.5 hover:bg-gray-100 active:scale-95 rounded-full transition-all"
         >
-          <Info className="h-5 w-5 text-gray-600" />
+          <Info className="h-4 w-4 text-gray-600" />
         </button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-2">
         {!messagesLoaded ? (
           <div className="flex flex-col items-center justify-center h-full py-12">
             <div className="relative w-12 h-12 mb-4">
               <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-500 rounded-full opacity-20 animate-pulse"></div>
               <div className="animate-spin rounded-full h-12 w-12 border-3 border-blue-200 border-t-blue-600"></div>
             </div>
-            <p className="text-gray-500 font-medium">Loading messages...</p>
+            <p className="text-xs text-gray-500 font-medium">Loading messages...</p>
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full py-12">
-            <p className="text-gray-500 font-medium">No messages yet. Start the conversation!</p>
+          <div className="flex flex-col items-center justify-center h-full py-8">
+            <p className="text-xs text-gray-500 font-medium">No messages yet. Start the conversation!</p>
           </div>
         ) : (
           messages.map((message, index) => {
@@ -258,7 +301,7 @@ export default function ChatPage() {
             return (
               <div
                 key={message.id}
-                className={`flex gap-2 animate-in fade-in slide-in-from-bottom-1 duration-300`}
+                className={`flex gap-1 animate-in fade-in slide-in-from-bottom-1 duration-300`}
                 style={{
                   justifyContent: isMine ? 'flex-end' : 'flex-start',
                   animationDelay: `${index * 30}ms`,
@@ -266,7 +309,7 @@ export default function ChatPage() {
               >
                 {/* Profile Picture for Others */}
                 {!isMine && (
-                  <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 mt-1">
+                  <div className="w-6 h-6 rounded-full overflow-hidden flex-shrink-0 mt-0.5">
                     {senderPfp ? (
                       <img
                         src={senderPfp}
@@ -281,33 +324,33 @@ export default function ChatPage() {
                   </div>
                 )}
 
-                <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} gap-1`}>
+                <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} gap-0.5`}>
                   {/* Username for Others */}
                   {!isMine && (
-                    <span className="text-xs font-semibold text-gray-600 px-2">
+                    <span className="text-xs font-semibold text-gray-600 px-1.5">
                       {senderDisplayName}
                     </span>
                   )}
 
                   {/* Message Bubble */}
                   <div
-                    className={`max-w-[75%] rounded-2xl px-4 py-2 ${
+                    className={`max-w-[75%] rounded-xl px-3 py-1.5 ${
                       isMine
                         ? 'bg-blue-600 text-white shadow-md'
                         : 'bg-white text-gray-900 shadow-sm border border-gray-200'
                     }`}
                   >
-                    <p className="text-sm break-words">{message.content}</p>
+                    <p className="text-xs break-words">{message.content}</p>
                     <div
-                      className={`flex items-center gap-1 mt-1 text-xs ${
+                      className={`flex items-center gap-1 mt-0.5 text-xs ${
                         isMine ? 'text-blue-100 justify-end' : 'text-gray-500'
                       }`}
                     >
-                      <span>{formatTimestamp(message.timestamp)}</span>
+                      <span className="text-xs">{formatTimestamp(message.timestamp)}</span>
                       {isMine && (
                         <span>
-                          {message.status === 'sending' && <Check className="h-3 w-3" />}
-                          {message.status === 'sent' && <CheckCheck className="h-3 w-3" />}
+                          {message.status === 'sending' && <Check className="h-2.5 w-2.5" />}
+                          {message.status === 'sent' && <CheckCheck className="h-2.5 w-2.5" />}
                           {message.status === 'failed' && <span className="text-red-300">!</span>}
                         </span>
                       )}
@@ -322,7 +365,7 @@ export default function ChatPage() {
       </div>
 
       {/* Input */}
-      <div className="bg-white/95 border-t border-gray-200 px-4 py-4 backdrop-blur-sm">
+      <div className="bg-white/95 border-t border-gray-200 px-3 py-2 backdrop-blur-sm">
         <div className="flex items-center gap-2">
           <input
             type="text"
@@ -330,15 +373,15 @@ export default function ChatPage() {
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
             placeholder="Type a message..."
-            className="flex-1 px-4 py-3 bg-gray-100 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all"
+            className="flex-1 px-3 py-2 text-sm bg-gray-100 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all"
             disabled={isSending}
           />
           <button
             onClick={sendMessage}
             disabled={!newMessage.trim() || isSending}
-            className="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 active:scale-95 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg"
+            className="bg-blue-600 text-white p-2 rounded-full hover:bg-blue-700 active:scale-95 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg"
           >
-            <Send className="h-5 w-5" />
+            <Send className="h-4 w-4" />
           </button>
         </div>
       </div>
@@ -353,22 +396,22 @@ export default function ChatPage() {
             className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in scale-95 fade-in zoom-in duration-300"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Chat Info</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-4">Chat Info</h2>
 
-            <div className="space-y-4 mb-8">
-              <div className="pb-4 border-b border-gray-200">
-                <h3 className="text-sm font-semibold text-gray-600 mb-2">Chat Name</h3>
-                <p className="text-lg text-gray-900 font-medium">{chat.chatName}</p>
+            <div className="space-y-3 mb-6">
+              <div className="pb-2 border-b border-gray-200">
+                <h3 className="text-xs font-semibold text-gray-600 mb-1">Chat Name</h3>
+                <p className="text-sm text-gray-900 font-medium">{chat.chatName}</p>
               </div>
 
-              <div className="pb-4 border-b border-gray-200">
-                <h3 className="text-sm font-semibold text-gray-600 mb-2">Members</h3>
-                <p className="text-lg text-gray-900 font-medium">{chat.memberWallets.length} member{chat.memberWallets.length !== 1 ? 's' : ''}</p>
+              <div className="pb-2 border-b border-gray-200">
+                <h3 className="text-xs font-semibold text-gray-600 mb-1">Members</h3>
+                <p className="text-sm text-gray-900 font-medium">{chat.memberWallets.length} member{chat.memberWallets.length !== 1 ? 's' : ''}</p>
               </div>
 
               <div>
-                <h3 className="text-sm font-semibold text-gray-600 mb-2">Created</h3>
-                <p className="text-gray-900">
+                <h3 className="text-xs font-semibold text-gray-600 mb-1">Created</h3>
+                <p className="text-sm text-gray-900">
                   {new Date(chat.createdAt).toLocaleDateString()}
                 </p>
               </div>
@@ -376,18 +419,49 @@ export default function ChatPage() {
 
             <button
               onClick={handleDeleteChat}
-              className="w-full bg-red-600 text-white font-medium py-3 rounded-lg hover:bg-red-700 active:scale-95 transition-all flex items-center justify-center gap-2 shadow-md"
+              className="w-full bg-red-600 text-white font-medium py-2 text-sm rounded-lg hover:bg-red-700 active:scale-95 transition-all flex items-center justify-center gap-2 shadow-md"
             >
-              <Trash2 className="h-5 w-5" />
+              <Trash2 className="h-4 w-4" />
               Delete Chat
             </button>
 
             <button
               onClick={() => setShowInfoModal(false)}
-              className="w-full mt-3 bg-gray-100 text-gray-900 font-medium py-3 rounded-lg hover:bg-gray-200 active:scale-95 transition-all"
+              className="w-full mt-2 bg-gray-100 text-gray-900 font-medium py-2 text-sm rounded-lg hover:bg-gray-200 active:scale-95 transition-all"
             >
               Close
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 px-4 animate-in fade-in duration-300"
+          onClick={() => setShowDeleteConfirm(false)}
+        >
+          <div
+            className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in scale-95 fade-in zoom-in duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-bold text-gray-900 mb-3">Delete Chat?</h2>
+            <p className="text-sm text-gray-600 mb-6">Are you sure you want to delete this chat? This action cannot be undone.</p>
+
+            <div className="flex gap-2">
+              <button
+                onClick={cancelDelete}
+                className="flex-1 bg-gray-100 text-gray-900 font-medium py-2 text-sm rounded-lg hover:bg-gray-200 active:scale-95 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="flex-1 bg-red-600 text-white font-medium py-2 text-sm rounded-lg hover:bg-red-700 active:scale-95 transition-all"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       )}
