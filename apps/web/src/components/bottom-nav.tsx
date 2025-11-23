@@ -7,6 +7,11 @@ export default function BottomNav() {
   const pathname = usePathname();
   const router = useRouter();
 
+  // Hide bottom nav inside individual chats
+  if (pathname.startsWith("/chats/") && pathname !== "/chats") {
+    return null;
+  }
+
   const isActive = (path: string) => {
     if (path === "/chats") {
       return pathname === "/chats" || pathname.startsWith("/chats/");
