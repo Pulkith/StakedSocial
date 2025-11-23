@@ -98,10 +98,6 @@ export function InviteFriends({ username, context }: { username: string, context
       hex = hex.startsWith("0x") ? hex.slice(2) : hex;
       return new Uint8Array(hex.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
     };
-    // console.log("Signing wallet:", address);
-    // console.log("Sign message async:", _address);
-
-    // _address = "0xE627CEb73a02d39CeD519c496Bf8C81fe6317005";
   
     const signer: Signer = {
       type: "EOA",
@@ -112,7 +108,6 @@ export function InviteFriends({ username, context }: { username: string, context
       signMessage: async (message) => {
         const msg = typeof message === "string" ? message : new TextDecoder().decode(message);
         const sigHex = await signMessageAsync({ message: msg });
-        console.log("Signature (hex):", msg, sigHex);
         return hexToBytes(sigHex);
       },
     };
@@ -134,8 +129,7 @@ export function InviteFriends({ username, context }: { username: string, context
     }
     // const other_address = "0x7a19e4496bf4428eb414cf7ad4a80dfe53b2a965";
     const client = await getClient(user_wallet_address, signMessageAsync);
-    console.log("CLIENT", client);
-    console.log("ID", client.inboxId);
+    console.log("Inbox ID", client.inboxId);
 
 
 
