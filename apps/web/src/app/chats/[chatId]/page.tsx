@@ -9,6 +9,7 @@ import { useSignMessage } from "wagmi";
 import { getXMTPClient } from "@/lib/xmtp";
 import { useOptimisticMessaging } from "@/hooks/use-optimistic-messaging";
 import BetModal from "@/components/bet-modal";
+import BetMessageCard from "@/components/bet-message-card";
 import {
   getChatById,
   getChatMessages,
@@ -386,6 +387,18 @@ export default function ChatPage() {
             );
           })
         )}
+
+        {/* Mock Bet Message - Always show at bottom for testing */}
+        <BetMessageCard
+          question="Will Bitcoin reach $100k by end of year?"
+          creatorName={username}
+          deadline={new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()} // 7 days from now
+          onPlaceBet={() => {
+            console.log('[BET] Place bet clicked');
+            alert('Place bet clicked! This will open the betting interface.');
+          }}
+        />
+
         <div ref={messagesEndRef} />
       </div>
 
