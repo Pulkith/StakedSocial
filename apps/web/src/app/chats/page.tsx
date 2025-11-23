@@ -243,6 +243,22 @@ export default function ChatsPage() {
             {chats.map((chat, index) => {
               const hasUnread = (chat.unreadCount || 0) > 0 || chat.isNew;
 
+              // Generate consistent random gradient for each chat based on chatId
+              const gradients = [
+                "from-purple-500 to-pink-500",
+                "from-blue-500 to-cyan-500",
+                "from-green-500 to-emerald-500",
+                "from-red-500 to-pink-500",
+                "from-amber-500 to-orange-500",
+                "from-indigo-500 to-purple-500",
+                "from-rose-500 to-red-500",
+                "from-teal-500 to-cyan-500",
+                "from-violet-500 to-indigo-500",
+                "from-fuchsia-500 to-purple-500",
+              ];
+              const gradientIndex = chat.chatId.charCodeAt(0) % gradients.length;
+              const gradient = gradients[gradientIndex];
+
               return (
                 <div
                   key={chat.chatId}
@@ -262,11 +278,9 @@ export default function ChatsPage() {
                   }}
                 >
                   <div className="flex items-start gap-3">
-                    {/* Chat Icon */}
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 shadow-md ${
-                      hasUnread
-                        ? 'bg-gradient-to-br from-blue-500 to-indigo-600 animate-pulse'
-                        : 'bg-gradient-to-br from-blue-400 to-indigo-500'
+                    {/* Chat Icon with Random Gradient */}
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br ${gradient} ${
+                      hasUnread ? 'animate-pulse' : ''
                     }`}>
                       <MessageCircle className="h-5 w-5 text-white" />
                     </div>
@@ -286,6 +300,43 @@ export default function ChatsPage() {
                         }`}>
                           {formatTimestamp(chat.lastMessageTime || chat.createdAt)}
                         </span>
+                      </div>
+
+                      {/* Member Avatars */}
+                      <div className="flex items-center gap-0 mb-1">
+                        {chat.memberWallets.slice(0, 3).map((wallet, index) => {
+                          const profile = chat.memberProfiles?.[wallet];
+                          return (
+                            <div
+                              key={wallet}
+                              className="relative"
+                              style={{
+                                marginLeft: index === 0 ? 0 : "-6px",
+                                zIndex: 10 - index,
+                              }}
+                            >
+                              {profile?.pfp ? (
+                                <img
+                                  src={profile.pfp}
+                                  alt={profile.username}
+                                  className="w-5 h-5 rounded-full border border-white object-cover shadow-sm"
+                                  title={profile.username}
+                                />
+                              ) : (
+                                <div className="w-5 h-5 rounded-full border border-white bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+                                  {(profile?.display_name || wallet.slice(0, 6)).charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        {/* +N indicator if more than 3 members */}
+                        {chat.memberWallets.length > 3 && (
+                          <div className="w-5 h-5 rounded-full border border-white bg-gray-300 flex items-center justify-center text-xs font-bold text-gray-700 shadow-sm -ml-1.5">
+                            +{chat.memberWallets.length - 3}
+                          </div>
+                        )}
                       </div>
 
                       <p
