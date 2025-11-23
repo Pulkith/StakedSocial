@@ -101,17 +101,22 @@ export default function ChatPage() {
         await conversation.sync();
         const xmtpMessages = await conversation.messages();
 
-        // Convert XMTP messages to our format and update local storage
+        // Convert XMTP messages to our format
         const formattedMessages: ChatMessage[] = xmtpMessages.map((msg: any) => ({
           id: msg.id,
           chatId: chatId,
           content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-          senderAddress: msg.senderInboxId,
+          senderAddress: msg.senderAddress || msg.sender || walletAddress, // Use senderAddress instead of senderInboxId
           timestamp: msg.sentAt ? new Date(msg.sentAt).getTime() : Date.now(),
           status: 'sent' as const,
         }));
 
-        setMessages(formattedMessages);
+        // Merge with existing messages, avoiding duplicates
+        setMessages(prev => {
+          const newMessageIds = new Set(formattedMessages.map(m => m.id));
+          const existingNonDuplicates = prev.filter(m => !newMessageIds.has(m.id) && !m.id.startsWith('temp-'));
+          return [...existingNonDuplicates, ...formattedMessages];
+        });
 
         // Save to local storage
         formattedMessages.forEach(msg => saveMessage(msg));
@@ -120,14 +125,14 @@ export default function ChatPage() {
       }
     };
 
-    // Poll every 3 seconds
-    const interval = setInterval(pollMessages, 3000);
+    // Poll every 5 seconds
+    const interval = setInterval(pollMessages, 5000);
 
     // Initial poll
     pollMessages();
 
     return () => clearInterval(interval);
-  }, [conversation, chatId]);
+  }, [conversation, chatId, walletAddress]);
 
   useEffect(() => {
     scrollToBottom();
@@ -220,7 +225,8 @@ export default function ChatPage() {
   };
 
   const isMyMessage = (message: ChatMessage) => {
-    return message.senderAddress === walletAddress;
+    // Compare wallet addresses (case insensitive)
+    return message.senderAddress?.toLowerCase() === walletAddress?.toLowerCase();
   };
 
   if (!isMiniAppReady || !chat) {

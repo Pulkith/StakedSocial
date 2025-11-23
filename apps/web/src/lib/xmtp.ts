@@ -1,7 +1,10 @@
 import { Client, type Signer, type Identifier } from '@xmtp/browser-sdk';
 
 // Environment configuration - easy to change
-const XMTP_ENV = 'dev' as const; // Change to 'production' when ready
+// Options: 'local' | 'dev' | 'production'
+// 'dev' = ephemeral, messages get deleted
+// 'production' = messages stored indefinitely (costs real ETH)
+const XMTP_ENV = 'production' as const; // Using production for better testing persistence
 
 // Helper to convert hex to bytes
 export const hexToBytes = (hex: string): Uint8Array => {
