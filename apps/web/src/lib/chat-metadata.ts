@@ -1,3 +1,10 @@
+// User profile information
+export interface UserProfile {
+  username: string;
+  pfp: string;
+  display_name: string;
+}
+
 // Chat metadata types
 export interface ChatMetadata {
   chatId: string;
@@ -7,9 +14,12 @@ export interface ChatMetadata {
   createdBy: string; // wallet address
   memberWallets: string[]; // array of wallet addresses
   memberInboxIds: string[]; // array of inbox IDs
+  memberProfiles?: Record<string, UserProfile>; // wallet -> user profile mapping
   lastMessageTime?: number;
   lastMessage?: string;
+  lastMessageSender?: string; // wallet address of last message sender
   unreadCount?: number;
+  isNew?: boolean; // whether this chat has new unread messages
 }
 
 export interface ChatMessage {

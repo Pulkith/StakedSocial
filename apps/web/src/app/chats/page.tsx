@@ -91,25 +91,71 @@ export default function ChatsPage() {
 
   // XMTP polling disabled - messages come from optimistic messaging
 
-  // Listen for new chats from other users
+  // Listen for real-time chat updates via socket.io
   useEffect(() => {
     const socket = io(process.env.NEXT_PUBLIC_OPTIMISTIC_SERVER_URL || 'http://localhost:5001', {
       reconnection: true,
+    });
+
+    socket.on('connect', () => {
+      // Join user to their chat rooms
+      const localChats = getAllChats();
+      localChats.forEach(chat => {
+        socket.emit('join_chat', {
+          chat_id: chat.chatId,
+          user_id: walletAddress || username,
+        });
+      });
     });
 
     socket.on('new_chat_created', (chatData: ChatMetadata) => {
       saveChat(chatData);
       setChats(prev => {
         const exists = prev.some(c => c.chatId === chatData.chatId);
-        if (exists) return prev;
-        return [chatData, ...prev];
+        if (exists) {
+          // Update existing chat
+          return prev.map(c =>
+            c.chatId === chatData.chatId
+              ? { ...c, ...chatData, isNew: true }
+              : c
+          );
+        }
+        return [{ ...chatData, isNew: true }, ...prev];
+      });
+
+      // Join the new chat room
+      socket.emit('join_chat', {
+        chat_id: chatData.chatId,
+        user_id: walletAddress || username,
+      });
+    });
+
+    // Listen for message updates in chats
+    socket.on('chat_updated', (data: { chat_id: string; chat: ChatMetadata }) => {
+      saveChat(data.chat);
+      setChats(prev => {
+        const updated = prev.map(c => {
+          if (c.chatId === data.chat_id) {
+            return { ...c, ...data.chat, isNew: true };
+          }
+          return c;
+        });
+
+        // Sort by last message time
+        updated.sort((a, b) => {
+          const timeA = a.lastMessageTime || a.createdAt;
+          const timeB = b.lastMessageTime || b.createdAt;
+          return timeB - timeA;
+        });
+
+        return updated;
       });
     });
 
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [walletAddress, username]);
 
   const formatTimestamp = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -150,7 +196,7 @@ export default function ChatsPage() {
           </div>
           <button
             onClick={() => router.push('/invite')}
-            className="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 transition-colors shadow-lg"
+            className="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 active:scale-95 transition-all shadow-lg hover:shadow-xl"
             title="Create new chat"
           >
             <Plus className="h-6 w-6" />
@@ -159,35 +205,55 @@ export default function ChatsPage() {
 
         {/* Chats List */}
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className="flex flex-col items-center justify-center py-16">
+            <div className="relative w-12 h-12 mb-4">
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-500 rounded-full opacity-20 animate-pulse"></div>
+              <div className="animate-spin rounded-full h-12 w-12 border-3 border-blue-200 border-t-blue-600"></div>
+            </div>
+            <p className="text-gray-500 font-medium">Loading chats...</p>
           </div>
         ) : chats.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-2xl shadow-sm">
+          <div className="text-center py-12 bg-white rounded-2xl shadow-sm border border-gray-100">
             <MessageCircle className="h-16 w-16 text-gray-300 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-900 mb-2">No chats yet</h3>
             <p className="text-gray-600 mb-6">Start a conversation with your friends</p>
             <button
               onClick={() => router.push('/invite')}
-              className="px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              className="px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 active:scale-95 transition-all"
             >
               Create New Chat
             </button>
           </div>
         ) : (
           <div className="space-y-3">
-            {chats.map((chat) => {
-              const hasUnread = (chat.unreadCount || 0) > 0;
+            {chats.map((chat, index) => {
+              const hasUnread = (chat.unreadCount || 0) > 0 || chat.isNew;
 
               return (
                 <div
                   key={chat.chatId}
-                  onClick={() => router.push(`/chats/${chat.chatId}`)}
-                  className="bg-white rounded-2xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer border-2 border-transparent hover:border-blue-200"
+                  onClick={() => {
+                    // Clear the new flag when opening chat
+                    const updatedChat = { ...chat, isNew: false };
+                    setChats(prev =>
+                      prev.map(c => c.chatId === chat.chatId ? updatedChat : c)
+                    );
+                    router.push(`/chats/${chat.chatId}`);
+                  }}
+                  className={`bg-white rounded-2xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer border-2 border-transparent hover:border-blue-200 active:scale-98 animate-in fade-in slide-in-from-bottom-2 duration-300 ${
+                    hasUnread ? 'ring-1 ring-blue-500 ring-opacity-50' : ''
+                  }`}
+                  style={{
+                    animationDelay: `${index * 50}ms`,
+                  }}
                 >
                   <div className="flex items-start gap-4">
                     {/* Chat Icon */}
-                    <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center flex-shrink-0">
+                    <div className={`w-14 h-14 rounded-full flex items-center justify-center flex-shrink-0 shadow-md ${
+                      hasUnread
+                        ? 'bg-gradient-to-br from-blue-500 to-indigo-600 animate-pulse'
+                        : 'bg-gradient-to-br from-blue-400 to-indigo-500'
+                    }`}>
                       <MessageCircle className="h-7 w-7 text-white" />
                     </div>
 
@@ -201,25 +267,25 @@ export default function ChatsPage() {
                         >
                           {chat.chatName}
                         </h3>
-                        <span className="text-xs text-gray-500 flex-shrink-0 ml-2">
+                        <span className={`text-xs flex-shrink-0 ml-2 ${
+                          hasUnread ? 'font-semibold text-blue-600' : 'text-gray-500'
+                        }`}>
                           {formatTimestamp(chat.lastMessageTime || chat.createdAt)}
                         </span>
                       </div>
 
                       <p
                         className={`text-sm truncate ${
-                          hasUnread ? 'font-medium text-gray-700' : 'text-gray-600'
+                          hasUnread ? 'font-bold text-gray-900' : 'text-gray-600'
                         }`}
                       >
-                        {chat.lastMessage || `${chat.memberWallets.length} members`}
+                        {chat.lastMessage || "No messages yet"}
                       </p>
                     </div>
 
-                    {/* Unread Badge */}
+                    {/* New Message Indicator */}
                     {hasUnread && (
-                      <div className="bg-blue-600 text-white text-xs font-bold rounded-full h-6 w-6 flex items-center justify-center flex-shrink-0">
-                        {chat.unreadCount}
-                      </div>
+                      <div className="w-2 h-2 bg-blue-600 rounded-full flex-shrink-0 mt-1 shadow-lg animate-pulse"></div>
                     )}
                   </div>
                 </div>

@@ -163,7 +163,26 @@ export function InviteFriends({ username, context }: { username: string, context
 
     console.log("Group created:", group.id);
 
-    // Step 5: Save chat metadata
+    // Step 5: Save chat metadata with user profiles
+    // Build member profiles map
+    const memberProfiles: Record<string, { username: string; pfp: string; display_name: string }> = {};
+
+    // Add current user profile
+    memberProfiles[user.wallet_address] = {
+      username: user.username || "@user",
+      pfp: user.pfp || "",
+      display_name: user.display_name || "You",
+    };
+
+    // Add selected friends profiles
+    selectedFriendsData.forEach(friend => {
+      memberProfiles[friend.wallet_address] = {
+        username: friend.username,
+        pfp: friend.pfp,
+        display_name: friend.display_name,
+      };
+    });
+
     const chatMetadata: ChatMetadata = {
       chatId: group.id,
       groupId: group.id,
@@ -172,6 +191,7 @@ export function InviteFriends({ username, context }: { username: string, context
       createdBy: user.wallet_address,
       memberWallets,
       memberInboxIds,
+      memberProfiles,
     };
 
     saveChat(chatMetadata);

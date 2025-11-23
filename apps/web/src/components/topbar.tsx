@@ -2,10 +2,12 @@
 
 import { useMiniApp } from "@/contexts/miniapp-context";
 import { useAccount } from "wagmi";
+import { usePathname } from "next/navigation";
 
 export function TopBar() {
   const { context, isMiniAppReady } = useMiniApp();
   const { address, isConnected, isConnecting } = useAccount();
+  const pathname = usePathname();
 
   // Extract user data from context
   const user = context?.user;
@@ -27,6 +29,12 @@ export function TopBar() {
   };
 
   if (!isMiniAppReady) {
+    return null;
+  }
+
+  // Hide TopBar when inside a chat (but show on the chats list page)
+  const isInChat = pathname.startsWith('/chats/') && pathname !== '/chats';
+  if (isInChat) {
     return null;
   }
 
