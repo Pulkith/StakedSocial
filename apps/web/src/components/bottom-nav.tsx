@@ -33,7 +33,7 @@ export default function BottomNav() {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-gray-200 px-4 py-2">
+    <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t border-gray-100 shadow-2xl">
       <div className="flex items-center justify-around max-w-2xl mx-auto">
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -43,14 +43,36 @@ export default function BottomNav() {
             <button
               key={item.path}
               onClick={() => router.push(item.path)}
-              className={`flex flex-col items-center gap-1 py-3 px-4 rounded-lg transition-all duration-200 ${
-                active
-                  ? "bg-blue-100 text-blue-600"
-                  : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+              className={`relative flex flex-col items-center gap-1.5 py-3 px-6 transition-all duration-300 group ${
+                active ? "text-blue-600" : "text-gray-400 hover:text-gray-600"
               }`}
             >
-              <Icon className={`${active ? "h-5 w-5" : "h-5 w-5"} transition-all`} />
-              <span className={`text-xs font-medium ${active ? "text-blue-600" : "text-gray-600"}`}>
+              {/* Active indicator bar */}
+              {active && (
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-t-full"></div>
+              )}
+
+              {/* Icon with background */}
+              <div
+                className={`p-2 rounded-xl transition-all duration-300 ${
+                  active
+                    ? "bg-blue-100"
+                    : "bg-transparent group-hover:bg-gray-100"
+                }`}
+              >
+                <Icon
+                  className={`w-5 h-5 transition-all duration-300 ${
+                    active ? "text-blue-600 scale-110" : "text-gray-400 group-hover:text-gray-600"
+                  }`}
+                />
+              </div>
+
+              {/* Label */}
+              <span
+                className={`text-xs font-semibold transition-all duration-300 ${
+                  active ? "text-blue-600" : "text-gray-500 group-hover:text-gray-600"
+                }`}
+              >
                 {item.label}
               </span>
             </button>
