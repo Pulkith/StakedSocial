@@ -1,13 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Search, Check } from "lucide-react";
-import type { Signer, Identifier } from '@xmtp/browser-sdk';
-import { Client } from '@xmtp/browser-sdk';
-// import { hexToBytes } from "@noble/hashes/utils";
-import { sdk } from "@farcaster/frame-sdk";
-import { useAccount, useConnect } from "wagmi";
+import { Search, Check, CheckCircle, AlertCircle } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useSignMessage } from "wagmi";
+import { getXMTPClient, checkCanMessage } from "@/lib/xmtp";
+import { saveChat, type ChatMetadata } from "@/lib/chat-metadata";
 interface Friend {
   fid: number;
   fid_str: string;
@@ -65,14 +63,19 @@ interface Friend {
 
 
 export function InviteFriends({ username, context }: { username: string, context: any }) {
+  const router = useRouter();
   const [friends, setFriends] = useState<Friend[]>([]);
   const [user, setUser] = useState<Friend | null>(null);
   const [selectedFriends, setSelectedFriends] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
+  const [chatName, setChatName] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
+  const [alert, setAlert] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
-  const { address, isConnected, isConnecting } = useAccount();
   const { signMessageAsync } = useSignMessage();
 
   console.log(username);
@@ -95,49 +98,86 @@ export function InviteFriends({ username, context }: { username: string, context
     return [user_data_json, res];
   }
 
-  async function getClient(_address: string, signMessageAsync: (args: { message: string }) => Promise<`0x${string}`>) {
-    const hexToBytes = (hex: string) => {
-      hex = hex.startsWith("0x") ? hex.slice(2) : hex;
-      return new Uint8Array(hex.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
-    };
-  
-    const signer: Signer = {
-      type: "EOA",
-      getIdentifier: () => ({
-        identifier: _address as `0x${string}`,
-        identifierKind: "Ethereum",
-      }),
-      signMessage: async (message) => {
-        const msg = typeof message === "string" ? message : new TextDecoder().decode(message);
-        const sigHex = await signMessageAsync({ message: msg });
-        return hexToBytes(sigHex);
-      },
-    };
-  
-    const client = await Client.create(signer, { env: "dev" });
-    return client;
-  }
-
-
-  // Function to create chat (to be implemented)
-  async function createChat(user: Friend | null, selectedFriendIds: string[], context: any): Promise<void> {
-    // TODO: Replace with actual API call
-    console.log("Creating chat with friends:", selectedFriendIds);
-
-    const user_wallet_address = user?.wallet_address;
-
-    if (!user_wallet_address) {
+  // Function to create chat
+  async function createChat(
+    user: Friend | null,
+    selectedFriendIds: string[],
+    chatName: string
+  ): Promise<void> {
+    if (!user?.wallet_address) {
       throw new Error("User not ready to chat");
     }
-    // const other_address = "0x7a19e4496bf4428eb414cf7ad4a80dfe53b2a965";
-    const client = await getClient(user_wallet_address, signMessageAsync);
-    console.log("Inbox ID", client.inboxId);
 
+    if (!signMessageAsync) {
+      throw new Error("Sign message function not available");
+    }
 
+    // Get selected friends data
+    const selectedFriendsData = friends.filter(f => selectedFriendIds.includes(f.fid_str));
+    const memberWallets = [user.wallet_address, ...selectedFriendsData.map(f => f.wallet_address)];
 
+    // Step 1: Check if all members can be messaged on XMTP
+    console.log("Checking if members can be messaged...");
+    const canMessageMap = await checkCanMessage(memberWallets);
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    const unreachableMembers: string[] = [];
+    canMessageMap.forEach((canMessage, address) => {
+      if (!canMessage) {
+        unreachableMembers.push(address);
+      }
+    });
 
+    if (unreachableMembers.length > 0) {
+      throw new Error(`Some members cannot be messaged on XMTP`);
+    }
+
+    // Step 2: Create XMTP client for the user
+    console.log("Creating XMTP client...");
+    const client = await getXMTPClient(user.wallet_address, signMessageAsync);
+    console.log("User Inbox ID:", client.inboxId);
+
+    // Step 3: Get inbox IDs for all members
+    const memberInboxIds: string[] = [client.inboxId];
+
+    for (const friend of selectedFriendsData) {
+      // For now, we'll need to get their inbox IDs
+      // In a production app, you might store these or fetch them from a backend
+      // For simplicity, we'll use a placeholder approach
+      try {
+        const friendClient = await getXMTPClient(friend.wallet_address, signMessageAsync);
+        memberInboxIds.push(friendClient.inboxId);
+      } catch (error) {
+        console.warn(`Could not get inbox ID for ${friend.wallet_address}`, error);
+      }
+    }
+
+    // Step 4: Create the group chat
+    console.log("Creating group chat...");
+    const group = await client.conversations.newGroup(
+      memberInboxIds.slice(1), // Don't include self in the list
+      {
+        name: chatName || `Chat with ${selectedFriendsData.map(f => f.display_name).join(', ')}`,
+        description: `Group chat created on ${new Date().toLocaleDateString()}`,
+      }
+    );
+
+    console.log("Group created:", group.id);
+
+    // Step 5: Save chat metadata
+    const chatMetadata: ChatMetadata = {
+      chatId: group.id,
+      groupId: group.id,
+      chatName: chatName || `Chat with ${selectedFriendsData.map(f => f.display_name).join(', ')}`,
+      createdAt: Date.now(),
+      createdBy: user.wallet_address,
+      memberWallets,
+      memberInboxIds,
+    };
+
+    saveChat(chatMetadata);
+    console.log("Chat metadata saved");
+
+    return;
   }
 
   // Load friends data
@@ -195,12 +235,47 @@ export function InviteFriends({ username, context }: { username: string, context
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 pt-24 pb-8">
       <div className="max-w-2xl mx-auto px-4">
+        {/* Alert Messages */}
+        {alert && (
+          <div
+            className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 animate-fade-in ${
+              alert.type === 'success'
+                ? 'bg-white border-2 border-green-500'
+                : 'bg-white border-2 border-red-500'
+            }`}
+          >
+            {alert.type === 'success' ? (
+              <CheckCircle className="h-5 w-5 text-green-600 font-bold" />
+            ) : (
+              <AlertCircle className="h-5 w-5 text-red-600 font-bold" />
+            )}
+            <p
+              className={`text-sm font-medium ${
+                alert.type === 'success' ? 'text-gray-900' : 'text-red-600'
+              }`}
+            >
+              {alert.message}
+            </p>
+          </div>
+        )}
+
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">Invite Friends</h1>
           <p className="text-gray-600">
             Select friends to start a chat and place bets
           </p>
+        </div>
+
+        {/* Chat Name Input */}
+        <div className="mb-6">
+          <input
+            type="text"
+            placeholder="Chat name (optional)"
+            value={chatName}
+            onChange={(e) => setChatName(e.target.value)}
+            className="w-full px-4 py-3 bg-white rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
         </div>
 
         {/* Search Bar */}
@@ -311,11 +386,32 @@ export function InviteFriends({ username, context }: { username: string, context
               onClick={async () => {
                 if (selectedFriends.size > 0) {
                   setIsCreatingChat(true);
+                  setAlert(null);
                   try {
                     const selectedFriendsArray = Array.from(selectedFriends);
-                    await createChat(user, selectedFriendsArray, context);
-                  } catch (error) {
+                    await createChat(user, selectedFriendsArray, chatName);
+
+                    // Show success alert
+                    setAlert({
+                      type: 'success',
+                      message: 'Chat created successfully!',
+                    });
+
+                    // Navigate to chat list after a short delay
+                    setTimeout(() => {
+                      router.push('/chats');
+                    }, 1500);
+                  } catch (error: any) {
                     console.error("Failed to create chat:", error);
+
+                    // Show error alert
+                    setAlert({
+                      type: 'error',
+                      message: error.message || 'Some members cannot be messaged',
+                    });
+
+                    // Clear alert after 5 seconds
+                    setTimeout(() => setAlert(null), 5000);
                   } finally {
                     setIsCreatingChat(false);
                   }
