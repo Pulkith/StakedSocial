@@ -135,11 +135,21 @@ export default function ChatPage() {
       senderAddress: msg.wallet || walletAddress,
       timestamp: new Date(msg.timestamp).getTime(),
       status: 'sent' as const,
+      type: 'message' as const, // Regular messages
     }));
 
+    // Get all bet messages from localStorage
+    const allMessages = getChatMessages(chatId);
+    const betMessages = allMessages.filter(m => m.type === 'bet');
+
+    // Combine bet messages with optimistic messages and sort by timestamp
+    const combinedMessages = [...betMessages, ...optimisticMessages].sort(
+      (a, b) => a.timestamp - b.timestamp
+    );
+
     // Only update if message count changed
-    if (optimisticMessages.length !== messages.length) {
-      setMessages(optimisticMessages);
+    if (combinedMessages.length !== messages.length || optimisticMessages.length !== messages.filter(m => m.type === 'message').length) {
+      setMessages(combinedMessages);
       // Only mark as loaded when we actually have messages to display
       setMessagesLoaded(true);
 
@@ -276,6 +286,11 @@ export default function ChatPage() {
       // Update chat markets list
       const updatedMarkets = getMarketsForChat(chatId);
       setChatMarkets(updatedMarkets);
+
+      // Reload messages to show the new bet message
+      const updatedMessages = getChatMessages(chatId);
+      setMessages(updatedMessages);
+      scrollToBottom();
 
       // Show success toast
       setToast({
