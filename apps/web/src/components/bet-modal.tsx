@@ -1,7 +1,28 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { X, Plus, Trash2, Search } from "lucide-react";
+import { X, Plus, Trash2, Search, Zap } from "lucide-react";
+
+enum DegenMode {
+  STANDARD = 0,
+  RANDOM_RANGE = 1,
+  CASCADING_ODDS = 2,
+  VOLATILITY_BOOST = 3,
+}
+
+const DEGEN_MODE_LABELS = {
+  [DegenMode.STANDARD]: "Standard Betting",
+  [DegenMode.RANDOM_RANGE]: "🎲 RNG Above/Below",
+  [DegenMode.CASCADING_ODDS]: "🌊 Cascading Odds",
+  [DegenMode.VOLATILITY_BOOST]: "⚡ Volatility Surge",
+};
+
+const DEGEN_MODE_DESCRIPTIONS = {
+  [DegenMode.STANDARD]: "Traditional binary outcome betting",
+  [DegenMode.RANDOM_RANGE]: "Outcomes determined by Pyth Entropy RNG threshold",
+  [DegenMode.CASCADING_ODDS]: "Multi-tier RNG with entropy-cascading logic",
+  [DegenMode.VOLATILITY_BOOST]: "4-tier RNG with time-decay volatility multiplier",
+};
 
 interface Outcome {
   id: string;
@@ -21,6 +42,8 @@ interface BetFormData {
   deadline: string;
   shareSize: string; // in Wei
   targets: TargetUser[];
+  degenMode?: DegenMode;
+  rngThreshold?: number; // 0-10000 for 0-100.00
 }
 
 interface BetModalProps {
@@ -73,6 +96,8 @@ export default function BetModal({
     deadline: "",
     shareSize: centsToWei(100), // Default 1 USD = 100 cents
     targets: [],
+    degenMode: DegenMode.STANDARD,
+    rngThreshold: 5000, // Default 50.00
   });
 
   const [currency, setCurrency] = useState<"usd" | "cents">("usd");
@@ -83,6 +108,8 @@ export default function BetModal({
   const [targetSearchInput, setTargetSearchInput] = useState("");
   const [filteredMembers, setFilteredMembers] = useState<TargetUser[]>([]);
   const targetSearchRef = useRef<HTMLDivElement>(null);
+  const [selectedDegenMode, setSelectedDegenMode] = useState<DegenMode>(DegenMode.STANDARD);
+  const [rngThresholdDisplay, setRngThresholdDisplay] = useState("50.00");
 
   // Filter members based on search input
   useEffect(() => {
@@ -268,10 +295,75 @@ export default function BetModal({
             />
           </div>
 
+          {/* Degen Mode Selection */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-2 flex items-center gap-2">
+              <Zap className="h-4 w-4 text-amber-500" />
+              Betting Mode
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {Object.entries(DEGEN_MODE_LABELS).map(([modeId, label]) => {
+                const mode = parseInt(modeId) as DegenMode;
+                return (
+                  <button
+                    key={mode}
+                    onClick={() => {
+                      setSelectedDegenMode(mode);
+                      setFormData((prev) => ({ ...prev, degenMode: mode }));
+                    }}
+                    className={`p-3 rounded-lg text-xs font-medium text-left transition-all ${
+                      selectedDegenMode === mode
+                        ? "bg-amber-100 border-2 border-amber-500 text-amber-900"
+                        : "bg-gray-100 border-2 border-transparent text-gray-700 hover:bg-gray-200"
+                    }`}
+                    disabled={isCreating}
+                  >
+                    <div className="font-semibold">{label}</div>
+                    <div className="text-xs opacity-75 mt-0.5">{DEGEN_MODE_DESCRIPTIONS[mode as DegenMode]}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* RNG Threshold (only show for degen modes) */}
+          {selectedDegenMode !== DegenMode.STANDARD && (
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-2">
+                RNG Threshold (0.00 - 100.00)
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={rngThresholdDisplay}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    setRngThresholdDisplay(val.toFixed(2));
+                    setFormData((prev) => ({
+                      ...prev,
+                      rngThreshold: Math.floor(val * 100), // Convert to 0-10000 scale
+                    }));
+                  }}
+                  className="flex-1 h-2 bg-amber-200 rounded-lg appearance-none cursor-pointer"
+                  disabled={isCreating}
+                />
+                <span className="text-sm font-mono font-semibold text-amber-700 min-w-[60px] text-right">
+                  {rngThresholdDisplay}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Bets on "Below": 0.00 - {rngThresholdDisplay} | "Above": {rngThresholdDisplay} - 100.00
+              </p>
+            </div>
+          )}
+
           {/* Outcomes */}
           <div>
             <label className="block text-xs font-semibold text-gray-700 mb-2">
-              Possible Outcomes *
+              Possible Outcomes {selectedDegenMode === DegenMode.STANDARD ? "*" : "(Auto for Degen)"}
             </label>
             <div className="space-y-2">
               {formData.outcomes.map((outcome) => (
