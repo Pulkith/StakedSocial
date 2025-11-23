@@ -75,6 +75,8 @@ export function InviteFriends({ username, context }: { username: string, context
   const { address, isConnected, isConnecting } = useAccount();
   const { signMessageAsync } = useSignMessage();
 
+  console.log(username);
+
   // Function to fetch real friends data (to be implemented)
   async function fetchFriendsData(username: string): Promise<[Friend, Friend[]]> {
 
@@ -133,15 +135,9 @@ export function InviteFriends({ username, context }: { username: string, context
 
 
 
-    // Simulate API call - replace with actual fetch
+
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // const response = await fetch('/api/chat/create', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify({ friendIds: selectedFriendIds }),
-    // });
-    // return response.json();
   }
 
   // Load friends data
@@ -151,6 +147,7 @@ export function InviteFriends({ username, context }: { username: string, context
       try {
         const [user_data, friends_data] = await fetchFriendsData(username);
         setUser(user_data);
+        console.log(user_data)
         setFriends(friends_data);
       } catch (error) {
         console.error("Failed to load friends:", error);

@@ -55,7 +55,8 @@ def get_followers():
         return jsonify({"error": "Provide ?fid="}), 400
 
     followers = client.get_followers(fid=int(fid))
-
+    print("GOT")
+    print(followers)
     resp = {"followers": []}
     for follower in followers.users:
         resp["followers"].append({
@@ -101,9 +102,9 @@ def get_friends():
     followers_fid_set = set(follower.fid for follower in followers.users)
     following_fid_set = set(following.fid for following in following.users)
 
-    friends_fid_set = followers_fid_set & following_fid_set
+    friends_fid_set = followers_fid_set | following_fid_set
 
-    for candidate in followers.users:
+    for candidate in following.users:
         if candidate.fid in friends_fid_set:
             resp["friends"].append({
                 "fid": candidate.fid,
