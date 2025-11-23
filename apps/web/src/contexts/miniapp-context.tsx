@@ -33,6 +33,7 @@ export function MiniAppProvider({ children, addMiniAppOnLoad }: MiniAppProviderP
 
   const setMiniAppReady = useCallback(async () => {
     try {
+      
       const context = await sdk.context;
       if (context) {
         setContext(context);

@@ -19,5 +19,9 @@
   "engines": {
     "node": ">=18.0.0",
     "pnpm": ">=8.0.0"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.0.1",
+    "@xmtp/browser-sdk": "^5.1.0"
   }
 }

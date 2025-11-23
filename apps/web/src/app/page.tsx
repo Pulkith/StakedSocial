@@ -31,6 +31,7 @@ export default function Home() {
   const displayName = user?.displayName || user?.username || "User";
   const username = user?.username || "@user";
   const pfpUrl = user?.pfpUrl;
+  console.log(walletAddress)
   
   // Format wallet address to show first 6 and last 4 characters
   const formatAddress = (address: string) => {
@@ -52,5 +53,5 @@ export default function Home() {
   }
 
   // Show the invite friends page
-  return <InviteFriends />;
+  return <InviteFriends username={username} context={context} />;
 }
