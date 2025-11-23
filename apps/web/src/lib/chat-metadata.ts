@@ -29,6 +29,8 @@ export interface ChatMessage {
   senderAddress: string;
   timestamp: number;
   status: 'sending' | 'sent' | 'failed';
+  type?: 'message' | 'bet'; // Default is 'message'
+  marketId?: string; // For bet messages
 }
 
 // LocalStorage keys

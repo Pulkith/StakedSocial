@@ -7,6 +7,12 @@ node_modules/
 dist/
 build/
 
+secrets.local.ts
+secrets.local.js
+*
+
+.env.local
+
 # Environment variables
 .env
 .env.local

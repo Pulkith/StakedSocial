@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ArrowLeft, Send, Info, Check, CheckCheck, Trash2, Plus } from "lucide-react";
+import { ArrowLeft, Send, Info, Check, CheckCheck, Trash2, Plus, CheckCircle, AlertCircle } from "lucide-react";
 import { useMiniApp } from "@/contexts/miniapp-context";
 import { useSocket } from "@/contexts/socket-context";
 import { useSignMessage } from "wagmi";
@@ -10,6 +10,7 @@ import { getXMTPClient } from "@/lib/xmtp";
 import { useOptimisticMessaging } from "@/hooks/use-optimistic-messaging";
 import BetModal from "@/components/bet-modal";
 import BetMessageCard from "@/components/bet-message-card";
+import { createMarket, getMarketsForChat, type MarketMetadata } from "@/lib/market-service";
 import {
   getChatById,
   getChatMessages,
@@ -44,6 +45,15 @@ export default function ChatPage() {
   const [conversation, setConversation] = useState<any>(null);
   const [useOptimistic, setUseOptimistic] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Toast notifications
+  const [toast, setToast] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+
+  // Markets for this chat
+  const [chatMarkets, setChatMarkets] = useState<MarketMetadata[]>([]);
 
   // Use shared socket connection
   const { socket } = useSocket();
@@ -97,6 +107,10 @@ export default function ChatPage() {
         setChat(clearedChat);
         saveChat(clearedChat);
       }
+
+      // Load markets for this chat
+      const markets = getMarketsForChat(chatId);
+      setChatMarkets(markets);
     }
   }, [chatId]);
 
@@ -238,17 +252,59 @@ export default function ChatPage() {
   };
 
   const handleCreateBet = async (betData: any) => {
-    // Log the bet data for now - you'll integrate with your backend later
     console.log('[BET] Creating bet with data:', betData);
 
-    // TODO: Integrate with your backend API
-    // For now, we'll simulate a small delay to show the loading state
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        console.log('[BET] Bet created successfully');
-        resolve({});
-      }, 2000);
-    });
+    try {
+      // Extract outcomes text from the bet data
+      const outcomeTexts = betData.outcomes.map((o: any) => o.text);
+
+      // Create market on-chain
+      const { marketId, metadata } = await createMarket({
+        question: betData.question,
+        description: betData.description,
+        outcomes: outcomeTexts,
+        deadline: betData.deadline,
+        shareSizeWei: betData.shareSize,
+        targets: betData.targets.map((t: any) => t.wallet),
+        chatId: chatId,
+        creatorUsername: username,
+        groupId: chatId,
+      });
+
+      console.log('[BET] Market created successfully:', marketId);
+
+      // Update chat markets list
+      const updatedMarkets = getMarketsForChat(chatId);
+      setChatMarkets(updatedMarkets);
+
+      // Show success toast
+      setToast({
+        type: "success",
+        message: "Market created successfully!",
+      });
+
+      // Auto-hide success toast after 3 seconds
+      setTimeout(() => setToast(null), 3000);
+
+      return { marketId, metadata };
+    } catch (error: any) {
+      console.error('[BET] Error creating market:', error);
+
+      // Handle specific error types
+      if (error.message === "INSUFFICIENT_FUNDS") {
+        setToast({
+          type: "error",
+          message: "Insufficient funds to create market. Please add funds to the admin account.",
+        });
+      } else {
+        setToast({
+          type: "error",
+          message: error.message || "Failed to create market. Please try again.",
+        });
+      }
+
+      throw error;
+    }
   };
 
   const formatTimestamp = (timestamp: number) => {
@@ -388,16 +444,19 @@ export default function ChatPage() {
           })
         )}
 
-        {/* Mock Bet Message - Always show at bottom for testing */}
-        <BetMessageCard
-          question="Will Bitcoin reach $100k by end of year?"
-          creatorName={username}
-          deadline={new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()} // 7 days from now
-          onPlaceBet={() => {
-            console.log('[BET] Place bet clicked');
-            alert('Place bet clicked! This will open the betting interface.');
-          }}
-        />
+        {/* Bet Messages - Show all markets for this chat */}
+        {chatMarkets.map((market) => (
+          <BetMessageCard
+            key={market.onchain.marketId}
+            question={market.static.question}
+            creatorName={market.runtime.creatorUsername || market.onchain.creator.slice(0, 8)}
+            deadline={new Date(parseInt(market.onchain.deadline) * 1000).toISOString()}
+            onPlaceBet={() => {
+              console.log('[BET] Place bet clicked for market:', market.onchain.marketId);
+              alert('Place bet clicked! This will open the betting interface.');
+            }}
+          />
+        ))}
 
         <div ref={messagesEndRef} />
       </div>
@@ -519,6 +578,50 @@ export default function ChatPage() {
         }
         onCreateBet={handleCreateBet}
       />
+
+      {/* Toast Notifications */}
+      {toast && (
+        <>
+          {toast.type === "success" ? (
+            // Success toast - top of screen
+            <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-top duration-300">
+              <div className="bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
+                <CheckCircle className="h-4 w-4" />
+                <span className="text-sm font-medium">{toast.message}</span>
+              </div>
+            </div>
+          ) : (
+            // Error toast - center of screen with backdrop
+            <div
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] px-4 animate-in fade-in duration-300"
+              onClick={() => setToast(null)}
+            >
+              <div
+                className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in scale-95 fade-in zoom-in duration-300"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="p-2 bg-red-100 rounded-full flex-shrink-0">
+                    <AlertCircle className="h-5 w-5 text-red-600" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-base font-bold text-gray-900 mb-1">
+                      Market Creation Failed
+                    </h3>
+                    <p className="text-sm text-gray-600">{toast.message}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setToast(null)}
+                  className="w-full bg-gray-100 text-gray-900 font-medium py-2 text-sm rounded-lg hover:bg-gray-200 active:scale-95 transition-all"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
