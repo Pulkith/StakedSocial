@@ -18,6 +18,7 @@ We thought the fairest way would be requiring unanimous verification. To make it
 ## How it's Made
 The base app was made through a Celo-templated version of Farcaster, which made it much easier to work with and deploy the app! We used XMTP for all the chat-messaging between friends, managing friend groups, and a little bit with agents. We used facial landmarking (YOLO v7) and embedding (EigenFace) for the computer-vision-based verification and image extraction. The agentic workflow was built with simple tool calls through OpenAI (gpt 5 with minimal). We used Pyth for the nondeterminism in the casino and degen modes for a little bit more fun, and it let it be in a way where the user can confirm there's no foul play happening with how the randomness is done! Used HardHat for testing and deploying the contracts on-chain.
 
+For more details on the optimization done for latency and performance, take a look at [the detailed README around Optimistic Messaging](https://github.com/Pulkith/StakedSocial/tree/main)
 
 ## To Run
 A new Celo blockchain project
@@ -32,8 +33,9 @@ A modern Celo blockchain application built with Next.js, TypeScript, and Turbore
    pnpm dev
    ```
 
-
 3. Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+4. Setup [Farcaster](https://github.com/Pulkith/StakedSocial/blob/main/FARCASTER_SETUP.md) and the [optimal messaging backend](https://github.com/Pulkith/StakedSocial/blob/main/OPTIMISTIC_MESSAGING_SETUP.md) for full functionality.
 
 ## Project Structure
 
