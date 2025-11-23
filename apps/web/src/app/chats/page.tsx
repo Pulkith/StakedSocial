@@ -4,9 +4,10 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, MessageCircle } from "lucide-react";
 import { useMiniApp } from "@/contexts/miniapp-context";
-import { getAllChats, type ChatMetadata, getChatMessages } from "@/lib/chat-metadata";
+import { getAllChats, type ChatMetadata, getChatMessages, saveChat } from "@/lib/chat-metadata";
 import { getXMTPClient } from "@/lib/xmtp";
 import { useSignMessage } from "wagmi";
+import { io } from "socket.io-client";
 
 export default function ChatsPage() {
   const router = useRouter();
@@ -42,19 +43,40 @@ export default function ChatsPage() {
     }
   }, [isMiniAppReady, username]);
 
-  // Load chats from localStorage
+  // Load chats from backend and localStorage
   useEffect(() => {
-    const loadChats = () => {
+    const loadChats = async () => {
       setIsLoading(true);
       try {
-        const allChats = getAllChats();
+        // Load from localStorage first
+        const localChats = getAllChats();
+
+        // Then fetch from backend
+        try {
+          const backendUrl = process.env.NEXT_PUBLIC_OPTIMISTIC_SERVER_URL || 'http://localhost:5001';
+          const response = await fetch(`${backendUrl}/api/get-all-chats`);
+          const data = await response.json();
+          const backendChats = data.chats || {};
+
+          // Convert backend chats to ChatMetadata format if needed
+          Object.values(backendChats).forEach((chat: any) => {
+            if (chat && chat.chatId && !localChats.find(c => c.chatId === chat.chatId)) {
+              // Save backend chats to local storage
+              saveChat(chat);
+              localChats.push(chat);
+            }
+          });
+        } catch (error) {
+          console.warn("Could not fetch chats from backend:", error);
+        }
+
         // Sort by last message time or created time
-        allChats.sort((a, b) => {
+        localChats.sort((a, b) => {
           const timeA = a.lastMessageTime || a.createdAt;
           const timeB = b.lastMessageTime || b.createdAt;
           return timeB - timeA;
         });
-        setChats(allChats);
+        setChats(localChats);
       } catch (error) {
         console.error("Error loading chats:", error);
       } finally {
@@ -67,41 +89,27 @@ export default function ChatsPage() {
     }
   }, [isMiniAppReady]);
 
-  // Poll for new messages
+  // XMTP polling disabled - messages come from optimistic messaging
+
+  // Listen for new chats from other users
   useEffect(() => {
-    if (!signMessageAsync || !walletAddress || chats.length === 0) return;
+    const socket = io(process.env.NEXT_PUBLIC_OPTIMISTIC_SERVER_URL || 'http://localhost:5001', {
+      reconnection: true,
+    });
 
-    const pollMessages = async () => {
-      try {
-        const client = await getXMTPClient(walletAddress, signMessageAsync);
+    socket.on('new_chat_created', (chatData: ChatMetadata) => {
+      saveChat(chatData);
+      setChats(prev => {
+        const exists = prev.some(c => c.chatId === chatData.chatId);
+        if (exists) return prev;
+        return [chatData, ...prev];
+      });
+    });
 
-        for (const chat of chats) {
-          try {
-            const conversation = await client.conversations.getConversationById(chat.groupId);
-            if (conversation) {
-              await conversation.sync();
-              const messages = await conversation.messages();
-
-              if (messages.length > 0) {
-                const lastMessage = messages[messages.length - 1];
-                // Update chat metadata if there's a new message
-                // This would be handled by the chat metadata storage
-              }
-            }
-          } catch (error) {
-            console.warn(`Error polling chat ${chat.chatId}:`, error);
-          }
-        }
-      } catch (error) {
-        console.error("Error polling messages:", error);
-      }
+    return () => {
+      socket.disconnect();
     };
-
-    // Poll every 5 seconds
-    const interval = setInterval(pollMessages, 5000);
-
-    return () => clearInterval(interval);
-  }, [chats, signMessageAsync, walletAddress]);
+  }, []);
 
   const formatTimestamp = (timestamp: number) => {
     const date = new Date(timestamp);

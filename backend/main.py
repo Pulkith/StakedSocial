@@ -15,17 +15,51 @@ import uuid
 # Initialize Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'optimistic-messaging-secret')
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
-# Initialize SocketIO
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Initialize SocketIO - allow CORS from all origins
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='threading',
+    logger=False,
+    engineio_logger=False
+)
 
 # Message storage file
 MESSAGES_FILE = os.path.join(os.path.dirname(__file__), 'messages.json')
+CHATS_FILE = os.path.join(os.path.dirname(__file__), 'chats.json')
 
 # Active connections tracking
 active_users = {}  # {user_id: {socket_id, username, wallet}}
 chat_rooms = {}    # {chat_id: [user_ids]}
+
+
+def load_chats():
+    """Load chats from JSON file"""
+    if os.path.exists(CHATS_FILE):
+        try:
+            with open(CHATS_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
+
+
+def save_chats(chats):
+    """Save chats to JSON file"""
+    try:
+        with open(CHATS_FILE, 'w') as f:
+            json.dump(chats, f, indent=2)
+    except IOError as e:
+        print(f"Error saving chats: {e}")
+
+
+def save_chat(chat_id, chat_data):
+    """Save a single chat"""
+    chats = load_chats()
+    chats[chat_id] = chat_data
+    save_chats(chats)
 
 
 def load_messages():
@@ -258,6 +292,28 @@ def get_chats():
             'last_message': chat_messages[-1] if chat_messages else None,
             'active_users': len(chat_rooms.get(chat_id, []))
         }
+    return {'chats': chats}
+
+
+@app.route('/api/broadcast-chat', methods=['POST'])
+def broadcast_chat():
+    """Broadcast new chat creation to all connected users"""
+    data = request.get_json()
+    chat_data = data.get('chat')
+
+    if chat_data:
+        chat_id = chat_data.get('chatId')
+        save_chat(chat_id, chat_data)
+        socketio.emit('new_chat_created', chat_data, broadcast=True)
+        print(f"Chat broadcasted: {chat_id}")
+
+    return {'status': 'broadcasted'}
+
+
+@app.route('/api/get-all-chats', methods=['GET'])
+def get_all_chats():
+    """Get all saved chats"""
+    chats = load_chats()
     return {'chats': chats}
 
 

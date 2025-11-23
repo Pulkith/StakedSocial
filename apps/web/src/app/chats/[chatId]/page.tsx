@@ -81,27 +81,10 @@ export default function ChatPage() {
     }
   }, [chatId]);
 
-  // Initialize XMTP conversation
+  // XMTP disabled - using optimistic messaging only
   useEffect(() => {
-    if (!signMessageAsync || !walletAddress || !chat) return;
-
-    const initConversation = async () => {
-      try {
-        const client = await getXMTPClient(walletAddress, signMessageAsync);
-        const conv = await client.conversations.getConversationById(chat.groupId);
-
-        if (conv) {
-          setConversation(conv);
-          // Sync conversation to get latest messages
-          await conv.sync();
-        }
-      } catch (error) {
-        console.error("Error initializing conversation:", error);
-      }
-    };
-
-    initConversation();
-  }, [signMessageAsync, walletAddress, chat]);
+    // Never initialize XMTP
+  }, []);
 
   // Poll for new messages - DISABLED, using optimistic messaging only
   useEffect(() => {

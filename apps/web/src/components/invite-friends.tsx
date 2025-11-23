@@ -177,6 +177,17 @@ export function InviteFriends({ username, context }: { username: string, context
     saveChat(chatMetadata);
     console.log("Chat metadata saved");
 
+    // Broadcast chat creation to other users
+    try {
+      await fetch(`${process.env.NEXT_PUBLIC_OPTIMISTIC_SERVER_URL || 'http://localhost:5001'}/api/broadcast-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat: chatMetadata })
+      });
+    } catch (error) {
+      console.warn("Could not broadcast chat:", error);
+    }
+
     return;
   }
 

@@ -28,7 +28,7 @@ export interface OptimisticMessagingConfig {
 
 export const useOptimisticMessaging = (config: OptimisticMessagingConfig) => {
   const {
-    serverUrl = 'http://localhost:5001',
+    serverUrl = 'https://optim-api.ngrok-free.dev',
     userId,
     username,
     wallet,
@@ -80,16 +80,23 @@ export const useOptimisticMessaging = (config: OptimisticMessagingConfig) => {
 
     // Message events
     socket.on('new_message', (message: OptimisticMessage) => {
-      setMessages(prev => [...prev, message]);
+      setMessages(prev => {
+        const exists = prev.some(m => m.id === message.id);
+        if (exists) return prev;
+        return [...prev, message];
+      });
     });
 
     socket.on('chat_joined', (data) => {
-      console.log('Chat joined:', data.chat_id);
       setMessages(data.messages || []);
     });
 
     socket.on('user_typing', (data) => {
       console.log('User typing:', data.username);
+    });
+
+    socket.on('new_chat_created', (data) => {
+      // Chat broadcast event handled by caller
     });
 
     return () => {

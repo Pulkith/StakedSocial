@@ -5,6 +5,34 @@ import './globals.css';
 import { TopBar } from '@/components/topbar';
 import Providers from "@/components/providers"
 
+// Suppress XMTP logs
+if (typeof window !== 'undefined') {
+  const originalWarn = console.warn;
+  const originalLog = console.log;
+  const originalInfo = console.info;
+
+  console.warn = (...args: any[]) => {
+    const msg = args[0]?.toString?.() || '';
+    if (!msg.includes('xmtp') && !msg.includes('INFO') && !msg.includes('sync')) {
+      originalWarn(...args);
+    }
+  };
+
+  console.log = (...args: any[]) => {
+    const msg = args[0]?.toString?.() || '';
+    if (!msg.includes('xmtp') && !msg.includes('INFO') && !msg.includes('sync')) {
+      originalLog(...args);
+    }
+  };
+
+  console.info = (...args: any[]) => {
+    const msg = args[0]?.toString?.() || '';
+    if (!msg.includes('xmtp') && !msg.includes('INFO') && !msg.includes('sync')) {
+      originalInfo(...args);
+    }
+  };
+}
+
 const inter = Inter({ subsets: ['latin'] });
 
 const appUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
